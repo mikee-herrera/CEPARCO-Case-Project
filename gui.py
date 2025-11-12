@@ -35,35 +35,37 @@ class RiscVGUI:
 
     def create_program_tab(self):
         """Create the program input tab."""
-        frame = ttk.Frame(self.notebook)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
         self.notebook.add(frame, text="Program Input")
     
     def create_register_tab(self):
         """Create the register input tab."""
-        frame = ttk.Frame(self.notebook)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
         self.notebook.add(frame, text="Register Input")
     
     def create_memory_tab(self):
         """Create the memory input tab."""
-        frame = ttk.Frame(self.notebook)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
         self.notebook.add(frame, text="Memory Input")
     
     def create_memory_table(self, parent):
         """Create memory table for data segment."""
         # Create frame with scrollbar
-        table_frame = ttk.Frame(parent)
+        table_frame = tk.Frame(parent,bg="#D3D3D3",bd=1)
         table_frame.pack(fill='both', expand=True, padx=10, pady=10)
     
     def create_opcode_tab(self):
         """Create the opcode output tab."""
-        frame = ttk.Frame(self.notebook)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
         self.notebook.add(frame, text="Opcode Output")
     def create_buttons(self):
         frame = tk.Frame(self.root,bg="#D3D3D3",bd=1,relief="sunken")
         frame.pack(fill='x', side='top',padx=10,pady=(10,0))
-        self.button = Button(frame,text="Run",width=3)
-        self.button.pack(side="right",padx=15)
-        
+        self.runButton = Button(frame,text="Run",width=3)
+        self.runButton.pack(side="right")
+        self.runButton["state"] = "disabled"
+        self.checkButton = Button(frame,text="Check",width=5)
+        self.checkButton.pack(side="right")
 
 def main():
     """Main function to run the GUI."""
