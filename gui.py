@@ -35,28 +35,28 @@ class RiscVGUI:
 
     def create_program_tab(self):
         """Create the program input tab."""
-        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
         self.notebook.add(frame, text="Program Input")
     
     def create_register_tab(self):
         """Create the register input tab."""
-        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
         self.notebook.add(frame, text="Register Input")
     
     def create_memory_tab(self):
         """Create the memory input tab."""
-        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
         self.notebook.add(frame, text="Memory Input")
     
     def create_memory_table(self, parent):
         """Create memory table for data segment."""
         # Create frame with scrollbar
-        table_frame = tk.Frame(parent,bg="#D3D3D3",bd=1)
+        table_frame = tk.Frame(parent,bg="#D3D3D3",bd=3)
         table_frame.pack(fill='both', expand=True, padx=10, pady=10)
     
     def create_opcode_tab(self):
         """Create the opcode output tab."""
-        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=1)
+        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
         self.notebook.add(frame, text="Opcode Output")
     def create_buttons(self):
         frame = tk.Frame(self.root,bg="#D3D3D3",bd=1,relief="sunken")
