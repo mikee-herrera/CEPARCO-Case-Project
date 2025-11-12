@@ -13,6 +13,8 @@ from tkinter import ttk, scrolledtext, messagebox,Button
 
 class RiscVGUI:
     def __init__(self, root):
+        self.entry_row_count = 0  # Tracks the next available grid row
+        self.entry_widgets = []
         self.root = root
         self.root.title("μRISCV Assembler Simulator")
         self.root.geometry("800x400")
@@ -35,9 +37,16 @@ class RiscVGUI:
 
     def create_program_tab(self):
         """Create the program input tab."""
-        frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
-        self.notebook.add(frame, text="Program Input")
     
+        self.frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
+        self.notebook.add(self.frame, text="Program Input")
+        self.frame.columnconfigure(1,weight=1)
+        self.add_entry(event=None)
+
+        
+        # line indicator
+        
+        
     def create_register_tab(self):
         """Create the register input tab."""
         frame = tk.Frame(self.notebook,bg="#D3D3D3",bd=3)
@@ -66,7 +75,27 @@ class RiscVGUI:
         self.runButton["state"] = "disabled"
         self.checkButton = Button(frame,text="Check",width=5)
         self.checkButton.pack(side="right")
-
+    def add_entry(self,event):
+        self.entry_row_count += 1
+        current_row = self.entry_row_count
+        # for row indicator 
+        line_label = tk.Label(self.frame,text=current_row)
+        line_label.grid(row=current_row,column=0,sticky='w')
+        # text input field
+        new_entry = tk.Entry(self.frame,bg="#D3D3D3",width=50)
+        new_entry.grid(row=current_row, column=1, padx=(5,0), pady=2, sticky='ew')
+        # add it to widget list so that it can be get() and will be process later
+        self.entry_widgets.append(new_entry)
+        new_entry.focus_set()
+        new_entry.bind("<Return>",self.hit_enter)
+    def hit_enter(self,event):
+        current_entry = event.widget
+        instruction = current_entry.get().strip()
+        if instruction: # if there is instruction then this will push thru
+            print("Hello")
+            self.add_entry(event)
+        else:  # if there is no instruction then this will not push thru (empty string)
+            self.add_entry(event)
 def main():
     """Main function to run the GUI."""
     root = tk.Tk()
