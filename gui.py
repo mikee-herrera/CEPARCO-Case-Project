@@ -32,7 +32,7 @@ class RiscVGUI:
         self.create_opcode_tab()
         # Status bar
         self.status_var = tk.StringVar()
-        self.status_var.set("Made by Sean Regindin")
+        self.status_var.set("Made by Sean Regindin,Marvien Castillo,Mikaela Herrera")
         status_bar = ttk.Label(root, textvariable=self.status_var, relief='sunken')
         status_bar.pack(side='bottom', fill='x')
 
@@ -84,6 +84,7 @@ class RiscVGUI:
             return "break" 
         last_index = self.entry_row_count - 1
         if instruction: # if there is instruction then this will push thru
+            self.evaluateCommand()
             self.add_entry(event)
         elif widget_index == last_index: # if current focus is the last entry then it will create a new entry
             self.add_entry(event)
@@ -106,7 +107,8 @@ class RiscVGUI:
         self.line_labels.append(line_label)
         self.new_entry.focus_set()
         self.new_entry.bind("<Return>",self.hit_enter) # if enter is typed
-    def evaluateInstruction():
+    def evaluateCommand(command):
+        print("Hello")
 
 def main():
     """Main function to run the GUI."""
