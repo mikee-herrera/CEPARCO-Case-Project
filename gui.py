@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox,Button
 
 # ============================================================
 # μRISCV Project - Milestone #1
@@ -16,8 +16,7 @@ class RiscVGUI:
         self.root = root
         self.root.title("μRISCV Assembler Simulator")
         self.root.geometry("800x400")
-        
-        
+        self.create_buttons()
         # Create notebook (tabs)
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
@@ -27,7 +26,6 @@ class RiscVGUI:
         self.create_register_tab()
         self.create_memory_tab()
         self.create_opcode_tab()
-
         # Status bar
         self.status_var = tk.StringVar()
         self.status_var.set("Made by Sean Regindin")
@@ -60,6 +58,12 @@ class RiscVGUI:
         """Create the opcode output tab."""
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="Opcode Output")
+    def create_buttons(self):
+        frame = tk.Frame(self.root,bg="#D3D3D3",bd=1,relief="sunken")
+        frame.pack(fill='x', side='top',padx=10,pady=(10,0))
+        self.button = Button(frame,text="Run",width=3)
+        self.button.pack(side="right",padx=15)
+        
 
 def main():
     """Main function to run the GUI."""
