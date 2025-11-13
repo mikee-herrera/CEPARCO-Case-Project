@@ -11,18 +11,18 @@ import re
 
 # Group 2,5: LW, SW, AND, OR, ORI, BLT, BGE
 # Supported instructions for Group 5
-R_TYPE = {"AND", "OR"}
-I_TYPE = {"ORI", "LW"}
-S_TYPE = {"SW"}
-B_TYPE = {"BLT", "BGE"}
+R_TYPE = {"AND": {"0110011": "111"}, "OR": {"0110011": "110"}}
+I_TYPE = {"ORI": {"0010011": "110"}, "LW": {"0000011": "010"}}
+S_TYPE = {"SW": {"0100011": "010"}}
+B_TYPE = {"BLT": {"1100011": "100"}, "BGE": {"1100011": "101"}}
 DIRECTIVE = {".WORD"}
-SUPPORTED_INSTRUCTIONS = R_TYPE | I_TYPE | S_TYPE | B_TYPE | DIRECTIVE
+SUPPORTED_INSTRUCTIONS = set(R_TYPE.keys()) | set(I_TYPE.keys()) | set(S_TYPE.keys()) | set(B_TYPE.keys()) | DIRECTIVE
 
 # Regular expressions for validation
 REGISTER_PATTERN = re.compile(r'^x([0-9]|[1-2][0-9]|3[0-1])$')
 IMMEDIATE_PATTERN = re.compile(r'^-?[0-9]+$')
 HEX_PATTERN = re.compile(r'^0x[0-9a-fA-F]+$')
-LABEL_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*:$')
+LABEL_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*:')
 
 class RiscVGUI:
     def __init__(self, root):
@@ -74,8 +74,19 @@ class RiscVGUI:
     
     def create_opcode_tab(self):
         """Create the opcode output tab."""
-        frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
-        self.notebook.add(frame, text="Opcode Output")
+        self.opcode_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.opcode_frame, text="Opcode Output")
+        
+        # Create scrolled text widget for opcode output
+        self.opcode_text = scrolledtext.ScrolledText(
+            self.opcode_frame, 
+            bg="white", 
+            width=80, 
+            height=20, 
+            font=("Courier New", 10)
+        )
+        self.opcode_text.pack(fill='both', expand=True, padx=10, pady=10)
+        self.opcode_text.config(state=tk.DISABLED)  # Make it read-only initially
         
     def create_buttons(self):
         frame = tk.Frame(self.root, bg="#D3D3D3", bd=1, relief="sunken")
@@ -87,8 +98,333 @@ class RiscVGUI:
         self.checkButton.pack(side="right")
 
     def run_program(self):
-        """Run the program (placeholder)."""
-        messagebox.showinfo("Run", "Running the program... (not implemented)")
+        """Run the program and generate opcode output."""
+        # Collect all instructions
+        instructions = []
+        for i, entry in enumerate(self.entry_widgets):
+            line_text = entry.get().strip()
+            if line_text:
+                instructions.append((i + 1, line_text))
+        
+        if not instructions:
+            messagebox.showwarning("No Program", "No instructions to run.")
+            return
+        
+        # Generate opcodes
+        opcodes = self.generate_opcodes(instructions)
+        
+        # Display in opcode tab
+        self.display_opcodes(opcodes)
+        
+        # Switch to opcode tab
+        self.notebook.select(3)  # Select opcode tab (4th tab, 0-indexed)
+        
+        self.status_var.set("Program executed - Opcodes generated")
+        messagebox.showinfo("Run Complete", "Program executed successfully! Check Opcode Output tab.")
+
+    def reg_to_bin(self, reg):
+        """Convert register name (e.g., x5) to 5-bit binary string."""
+        if not REGISTER_PATTERN.match(reg):
+            raise ValueError(f"Invalid register: {reg}")
+        return format(int(reg[1:]), '05b')
+
+    def imm_to_bin(self, imm, bits=12):
+        """Convert immediate to binary (2's complement for negative values)."""
+        try:
+            # Handle hex format
+            if isinstance(imm, str) and imm.startswith('0x'):
+                imm_val = int(imm, 16)
+            else:
+                imm_val = int(imm)
+            
+            if imm_val < 0:
+                imm_val = (1 << bits) + imm_val
+            return format(imm_val, f'0{bits}b')
+        except ValueError:
+            raise ValueError(f"Invalid immediate value: {imm}")
+
+    def binary_to_hex(self, binary_str):
+        """Convert binary string to hexadecimal."""
+        # Pad to multiple of 4 bits if necessary
+        padding = (4 - len(binary_str) % 4) % 4
+        binary_str = '0' * padding + binary_str
+        
+        # Convert to hex
+        hex_str = ''
+        for i in range(0, len(binary_str), 4):
+            nibble = binary_str[i:i+4]
+            hex_str += format(int(nibble, 2), 'x')
+        
+        return hex_str.zfill(8)  # Ensure 8 hex digits
+
+    def encode_r_type(self, instruction, operands):
+        """Encode R-type instructions (AND, OR)."""
+        opcode = list(R_TYPE[instruction].keys())[0]
+        funct3 = R_TYPE[instruction][opcode]
+        
+        rd = self.reg_to_bin(operands[0])
+        rs1 = self.reg_to_bin(operands[1])
+        rs2 = self.reg_to_bin(operands[2])
+        funct7 = "0000000"  # Default funct7 for AND/OR
+        
+        binary = funct7 + rs2 + rs1 + funct3 + rd + opcode
+        return self.binary_to_hex(binary)
+
+    def encode_i_type(self, instruction, operands):
+        """Encode I-type instructions (ORI, LW)."""
+        opcode = list(I_TYPE[instruction].keys())[0]
+        funct3 = I_TYPE[instruction][opcode]
+        
+        if instruction == "LW":
+            # LW rd, offset(rs1)
+            rd = self.reg_to_bin(operands[0])
+            # Parse offset(rs1) format - improved regex to handle hex
+            match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', operands[1])
+            if not match:
+                raise ValueError(f"Invalid LW operand format: {operands[1]}")
+            imm = match.group(1)
+            rs1 = self.reg_to_bin(match.group(2))
+            imm_bin = self.imm_to_bin(imm, 12)
+        else:  # ORI
+            rd = self.reg_to_bin(operands[0])
+            rs1 = self.reg_to_bin(operands[1])
+            imm_bin = self.imm_to_bin(operands[2], 12)
+        
+        binary = imm_bin + rs1 + funct3 + rd + opcode
+        return self.binary_to_hex(binary)
+
+    def encode_s_type(self, instruction, operands):
+        """Encode S-type instructions (SW)."""
+        
+        opcode = list(S_TYPE[instruction].keys())[0]
+        funct3 = S_TYPE[instruction][opcode]
+        
+        # SW rs2, offset(rs1)
+        rs2 = self.reg_to_bin(operands[0])
+        
+        # Parse offset(rs1) format
+        match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', operands[1])
+        if not match:
+            raise ValueError(f"Invalid SW operand format: {operands[1]}")
+        
+        imm = match.group(1)
+        rs1 = self.reg_to_bin(match.group(2))
+        
+        imm_bin = self.imm_to_bin(imm, 12)
+        
+        # S-type immediate is split: imm[11:5] + imm[4:0]
+        imm_11_5 = imm_bin[0:7]   # bits 11-5
+        imm_4_0 = imm_bin[7:12]   # bits 4-0
+        
+        binary = imm_11_5 + rs2 + rs1 + funct3 + imm_4_0 + opcode
+        
+        result = self.binary_to_hex(binary)
+        
+        return result
+
+    def encode_b_type(self, instruction, operands):
+        """Encode B-type instructions (BLT, BGE)."""
+        opcode = list(B_TYPE[instruction].keys())[0]
+        funct3 = B_TYPE[instruction][opcode]
+        
+        rs1 = self.reg_to_bin(operands[0])
+        rs2 = self.reg_to_bin(operands[1])
+        
+        # Handle immediate (for now, just use the value directly)
+        # In a real implementation, you'd handle labels and PC-relative addressing
+        imm_str = operands[2]
+        try:
+            if imm_str.startswith('0x'):
+                imm = int(imm_str, 16)
+            else:
+                imm = int(imm_str)
+        except ValueError:
+            # If it's not a number, use 0 as placeholder
+            imm = 0
+        
+        imm_bin = self.imm_to_bin(imm, 13)  # B-type uses 13-bit immediate
+        
+        # B-type immediate field is split: [12|10:5|4:1|11]
+        imm_12 = imm_bin[0]
+        imm_11 = imm_bin[1]  
+        imm_10_5 = imm_bin[2:8]
+        imm_4_1 = imm_bin[8:12]
+        
+        binary = imm_12 + imm_10_5 + rs2 + rs1 + funct3 + imm_4_1 + imm_11 + opcode
+        return self.binary_to_hex(binary)
+
+    def encode_directive(self, directive, operand):
+        """Encode .WORD directive."""
+        try:
+            if operand.startswith('0x'):
+                value = int(operand, 16)
+            else:
+                value = int(operand)
+            
+            # Ensure value fits in 32 bits
+            if value < -2147483648 or value > 4294967295:
+                raise ValueError(f"Value out of 32-bit range: {operand}")
+            
+            # Convert to 32-bit hexadecimal
+            if value < 0:
+                value = (1 << 32) + value
+            return format(value, '08x')
+        except ValueError:
+            raise ValueError(f"Invalid value for .WORD directive: {operand}")
+
+    def generate_opcodes(self, instructions):
+        """Generate hexadecimal opcodes for the instructions."""
+        opcodes = []
+        program_counter = 0x0080  # Program starts at 0x0080
+        
+        # First pass: collect labels
+        labels = {}
+        current_pc = program_counter
+        
+        for line_num, instruction in instructions:
+            clean_instruction = instruction.split('#')[0].strip()
+            if not clean_instruction:
+                continue
+                
+            # Check for label (could be at start of line or with instruction)
+            if ':' in clean_instruction:
+                # Handle labels - split by colon
+                label_part = clean_instruction.split(':')[0].strip()
+                instruction_part = clean_instruction.split(':')[1].strip() if len(clean_instruction.split(':')) > 1 else ""
+                
+                # Store label address
+                labels[label_part] = current_pc
+                
+                # If there's an instruction, it will be at the current PC
+                if instruction_part:
+                    current_pc += 4
+            else:
+                current_pc += 4
+        
+        # Second pass: generate opcodes
+        current_pc = program_counter
+        
+        for line_num, instruction in instructions:
+            clean_instruction = instruction.split('#')[0].strip()
+            if not clean_instruction:
+                continue
+                
+            # Handle labels with instructions
+            if ':' in clean_instruction:
+                label_part = clean_instruction.split(':')[0].strip()
+                instruction_part = clean_instruction.split(':')[1].strip() if len(clean_instruction.split(':')) > 1 else ""
+                
+                opcodes.append(f"0x{current_pc:04x}: [LABEL] {label_part}:")
+                
+                if instruction_part:
+                    # Process the instruction after the label
+                    if instruction_part.upper().startswith('SW'):
+                        # Special handling for SW instruction
+                        parts = instruction_part.split()
+                        mnemonic = parts[0].upper()
+                        rs2 = parts[1].rstrip(',')
+                        offset_rs1 = ' '.join(parts[2:])
+                        operands = [rs2, offset_rs1]
+                    else:
+                        parts = re.split(r'[,\s()]+', instruction_part)
+                        parts = [p for p in parts if p]
+                        mnemonic = parts[0].upper()
+                        operands = parts[1:]
+                    
+                    if parts:
+                        try:
+                            if mnemonic in R_TYPE:
+                                hex_opcode = self.encode_r_type(mnemonic, operands)
+                            elif mnemonic in I_TYPE:
+                                hex_opcode = self.encode_i_type(mnemonic, operands)
+                            elif mnemonic in S_TYPE:
+                                hex_opcode = self.encode_s_type(mnemonic, operands)
+                            elif mnemonic in B_TYPE:
+                                # For branch instructions, resolve labels
+                                if len(operands) >= 3 and operands[2] in labels:
+                                    # Calculate offset
+                                    offset = labels[operands[2]] - current_pc
+                                    modified_parts = operands[0:2] + [str(offset)]
+                                    hex_opcode = self.encode_b_type(mnemonic, modified_parts)
+                                else:
+                                    # Use the original operands if no label resolution
+                                    hex_opcode = self.encode_b_type(mnemonic, operands)
+                            elif mnemonic in DIRECTIVE:
+                                hex_opcode = self.encode_directive(mnemonic, operands[0])
+                            else:
+                                hex_opcode = "00000000"
+                            
+                            opcodes.append(f"0x{current_pc:04x}: {hex_opcode} // {instruction_part}")
+                            current_pc += 4
+                        except Exception as e:
+                            opcodes.append(f"0x{current_pc:04x}: ERROR - {str(e)} // {instruction_part}")
+                            current_pc += 4
+            else:
+                # Regular instruction
+                if clean_instruction.upper().startswith('SW'):
+                    # Special handling for SW instruction
+                    parts = clean_instruction.split()
+                    mnemonic = parts[0].upper()
+                    rs2 = parts[1].rstrip(',')
+                    offset_rs1 = ' '.join(parts[2:])
+                    operands = [rs2, offset_rs1]
+                else:
+                    parts = re.split(r'[,\s()]+', clean_instruction)
+                    parts = [p for p in parts if p]
+                    mnemonic = parts[0].upper()
+                    operands = parts[1:]
+                
+                if not parts:
+                    continue
+                    
+                try:
+                    if mnemonic in R_TYPE:
+                        hex_opcode = self.encode_r_type(mnemonic, operands)
+                    elif mnemonic in I_TYPE:
+                        hex_opcode = self.encode_i_type(mnemonic, operands)
+                    elif mnemonic in S_TYPE:
+                        hex_opcode = self.encode_s_type(mnemonic, operands)
+                    elif mnemonic in B_TYPE:
+                        # For branch instructions, resolve labels
+                        if len(operands) >= 3 and operands[2] in labels:
+                            # Calculate offset
+                            offset = labels[operands[2]] - current_pc
+                            modified_parts = operands[0:2] + [str(offset)]
+                            hex_opcode = self.encode_b_type(mnemonic, modified_parts)
+                        else:
+                            # Use the original operands if no label resolution
+                            hex_opcode = self.encode_b_type(mnemonic, operands)
+                    elif mnemonic in DIRECTIVE:
+                        hex_opcode = self.encode_directive(mnemonic, operands[0])
+                    else:
+                        hex_opcode = "00000000"
+                    
+                    opcodes.append(f"0x{current_pc:04x}: {hex_opcode} // {clean_instruction}")
+                    current_pc += 4
+                except Exception as e:
+                    opcodes.append(f"0x{current_pc:04x}: ERROR - {str(e)} // {clean_instruction}")
+                    current_pc += 4
+        
+        return opcodes
+
+    def display_opcodes(self, opcodes):
+        """Display generated opcodes in the opcode tab."""
+        self.opcode_text.config(state=tk.NORMAL)  # Enable editing
+        self.opcode_text.delete(1.0, tk.END)  # Clear previous content
+        
+        if opcodes:
+            header = "μRISCV OPCODE OUTPUT\n"
+            header += "=" * 60 + "\n"
+            header += "Address   Opcode     Instruction\n"
+            header += "=" * 60 + "\n"
+            self.opcode_text.insert(tk.END, header)
+            
+            for opcode_line in opcodes:
+                self.opcode_text.insert(tk.END, opcode_line + "\n")
+        else:
+            self.opcode_text.insert(tk.END, "No opcodes generated.")
+        
+        self.opcode_text.config(state=tk.DISABLED)  # Make it read-only again
 
     # when the user hit enter
     def hit_enter(self, event):
@@ -179,11 +515,48 @@ class RiscVGUI:
         if not instruction:
             return None
             
-        # Check for label
-        if LABEL_PATTERN.match(instruction):
-            return None  # Labels are valid
+        # Check for label (could be at start of line or with instruction)
+        if ':' in instruction:
+            # Handle labels - split by colon
+            label_part = instruction.split(':')[0].strip()
+            instruction_part = instruction.split(':')[1].strip() if len(instruction.split(':')) > 1 else ""
             
-        parts = re.split(r'[,\s()]+', instruction)
+            # Validate label format
+            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', label_part):
+                return f"Line {line_num}: Invalid label name '{label_part}'"
+                
+            # If there's an instruction after the label, validate it too
+            if instruction_part:
+                # Recursively validate the instruction part
+                error = self.validate_instruction(line_num, instruction_part)
+                if error:
+                    return error
+            return None  # Label is valid
+            
+        # For SW instructions, we need special handling because of the offset(rs1) format
+        if instruction.upper().startswith('SW'):
+            # Manual parsing for SW instruction
+            parts = instruction.split()
+            if len(parts) < 3:
+                return f"Line {line_num}: SW requires 2 operands (rs2, offset(rs1))"
+            
+            mnemonic = parts[0].upper()
+            rs2 = parts[1].rstrip(',')  # Remove trailing comma if present
+            
+            # The rest should be the offset(rs1) part
+            offset_rs1 = ' '.join(parts[2:])
+            
+            if not REGISTER_PATTERN.match(rs2):
+                return f"Line {line_num}: Invalid source register '{rs2}' in SW"
+            
+            # Check offset(rs1) format
+            if not re.match(r'.*\(.*\)', offset_rs1):
+                return f"Line {line_num}: Invalid memory operand format '{offset_rs1}' in SW"
+            
+            return None
+            
+        # For other instructions, use the original parsing
+        parts = re.split(r'[,\s]+', instruction)
         parts = [p for p in parts if p]
         
         if not parts:
@@ -220,15 +593,6 @@ class RiscVGUI:
                 if not (IMMEDIATE_PATTERN.match(parts[3]) or HEX_PATTERN.match(parts[3])):
                     return f"Line {line_num}: Invalid immediate '{parts[3]}' in ORI"
                     
-        elif mnemonic in S_TYPE:  # SW
-            if len(parts) != 3:
-                return f"Line {line_num}: SW requires 2 operands (rs2, offset(rs1))"
-            if not REGISTER_PATTERN.match(parts[1]):
-                return f"Line {line_num}: Invalid source register '{parts[1]}' in SW"
-            # Check offset(rs1) format
-            if not re.match(r'.*\(.*\)', parts[2]):
-                return f"Line {line_num}: Invalid memory operand format '{parts[2]}' in SW"
-                
         elif mnemonic in B_TYPE:  # BLT, BGE
             if len(parts) != 4:
                 return f"Line {line_num}: {mnemonic} requires 3 operands (rs1, rs2, offset)"
