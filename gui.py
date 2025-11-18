@@ -18,7 +18,9 @@ S_TYPE = {"SW": {"0100011": "010"}}
 B_TYPE = {"BLT": {"1100011": "100"}, "BGE": {"1100011": "101"}}
 DIRECTIVE = {".WORD"}
 SUPPORTED_INSTRUCTIONS = set(R_TYPE.keys()) | set(I_TYPE.keys()) | set(S_TYPE.keys()) | set(B_TYPE.keys()) | DIRECTIVE
-
+# Initialize 32 architectural registers (x0 is hardwired to 0)
+REGISTER_FILE = {i: 0 for i in range(32)}
+REGISTER_FILE[0] = 0
 # Regular expressions for validation
 REGISTER_PATTERN = re.compile(r'^x([0-9]|[1-2][0-9]|3[0-1])$')
 IMMEDIATE_PATTERN = re.compile(r'^-?[0-9]+$')
@@ -27,6 +29,7 @@ LABEL_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*:')
 
 class RiscVGUI:
     def __init__(self, root):
+        self.reg_entries = {}
         self.entry_row_count = 0  # Tracks the next available grid row
         self.entry_widgets = []
         self.line_labels = []
@@ -122,8 +125,14 @@ class RiscVGUI:
 
             entry = tk.Entry(self.innerFrame, width=15)
             entry.grid(row=i + 1, column=1, padx=5, pady=1)
-            entry.insert(i, "0x00000000")
-            entry.config(state='readonly', bg='#D3D3D3')
+            if i == 0:
+                entry.insert(0, "0x00000000")
+                entry.config(state='readonly', bg='#D3D3D3')
+            else:
+                entry.insert(0,f"0x{REGISTER_FILE[i]:08x}")
+                self.reg_entries[i] = entry
+                entry.config(state='readonly',bg='#D3D3D3')
+
         # Bind events to update the scroll region
         self.innerFrame.bind("<Configure>", self._on_frame1_configure)
     
