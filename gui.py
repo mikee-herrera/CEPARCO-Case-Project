@@ -558,6 +558,9 @@ class RiscVGUI:
 
             return "break" # Stop default character deletion
         
+        if (self.runButton['state'] == 'active'):
+            self.runButton["state"] = "disabled"
+        
         return # Allow default Backspace character deletion (if not deleted a row)
 
     def add_entry(self, event):
