@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, Button
+from tkinter.constants import DISABLED, NORMAL
 import re
 
 # ============================================================
@@ -492,66 +493,105 @@ class RiscVGUI:
         self.opcode_text.config(state=tk.DISABLED)  # Make it read-only again
 
     # when the user hit enter
+
     def hit_enter(self, event):
         current_entry = event.widget
-        instruction = current_entry.get() 
         try: 
             widget_index = self.entry_widgets.index(current_entry)
         except ValueError:
-            print("Error")
+            print("Error: Widget not found during hit_enter.")
             return "break" 
-        last_index = self.entry_row_count - 1
-        if widget_index == last_index: # if current focus is the last entry then it will create a new entry
-            self.add_entry(event)
-        else: 
-            # if the current entry is not the last then it will focus on the next entry
-            if((widget_index + 1) < self.entry_row_count):
-                self.entry_widgets[widget_index + 1].focus_set()
+            
+        list_length = len(self.entry_widgets)
+        last_index = list_length - 1
         
-        # After adding a new line, ensure the new line is visible
-        if widget_index == last_index and self.entry_row_count > 1:
-            # Scroll down to make the new entry visible
-            self.canvas.yview_moveto(1.0) # Move to the bottom
-    def hit_backspace(self,event):
+        # 1. Check if we are at the last line (add new entry)
+        if widget_index == last_index:
+            self.add_entry(event)
+            # Ensure the canvas scrolls to the new entry
+            self.canvas.yview_moveto(1.0)
+            
+        # 2. Otherwise, move focus to the next existing line
+        elif (widget_index + 1) < list_length:
+            self.entry_widgets[widget_index + 1].focus_set()
+        
+        # After a successful action (add or focus shift), break the event
+        return "break"
+
+
+    def hit_backspace(self, event):
         current_entry = event.widget
+        
+        # 1. Disable Run Button
+        if self.runButton['state'] == 'normal':
+            self.runButton["state"] = "disabled"
+            
         try:
             widget_index = self.entry_widgets.index(current_entry)
         except ValueError:
-            print("Error")
-        last_index =self.entry_row_count - 1
-        # this means is the top entry
-        if widget_index != 0 and not current_entry.get():
-            self.entry_widgets[widget_index - 1].focus_set()
-        if (self.runButton["state"] == "NORMAL"):
-            self.runButton["state"] = "disabled"
-        if widget_index == 0 and self.entry_row_count > 1:
-            self.canvas.yview_moveto(0.0)
-    def disable_run(self, event):
-        """Disable the Run button."""
-        self.runButton["state"] = "disabled"
+            print("Error: Widget not found during hit_backspace.")
+            return 
+            
+        current_text = current_entry.get()
 
-    # Add new entry
+        # 2. Row deletion logic: if not the first entry AND entry is empty
+        if widget_index != 0 and not current_text:
+            
+            # 1. Set focus to the entry above it
+            self.entry_widgets[widget_index - 1].focus_set()
+            
+            # 2. Destroy the widgets
+            current_entry.destroy()
+            self.line_labels[widget_index].destroy()
+
+            # 3. Remove from tracking lists
+            del self.entry_widgets[widget_index]
+            del self.line_labels[widget_index]      
+            
+            # 4. Re-number subsequent line labels
+            for i in range(len(self.entry_widgets)):
+                self.line_labels[i].config(text=str(i + 1)) 
+                
+            # 5. Update scroll region
+            self.inner_frame.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+            return "break" # Stop default character deletion
+        
+        return # Allow default Backspace character deletion (if not deleted a row)
+
     def add_entry(self, event):
-        self.entry_row_count += 1
-        current_row = self.entry_row_count
-        # for row indicator 
-        line_label = tk.Label(self.inner_frame, text=str(current_row), bg="#D3D3D3")
-        line_label.grid(row=current_row, column=0, sticky='w')
-        # text input field
-        self.new_entry = tk.Entry(self.inner_frame, bg="white", width=50) # Changed background to white for better visibility
-        self.new_entry.grid(row=current_row, column=1, padx=5, pady=2, sticky='ew')
-        # add it to widget list so that it can be get() and will be process later
+        self.entry_row_count += 1 
+        current_grid_row = self.entry_row_count # Use the unique counter for placement
+
+        # 1. Determine the VISIBLE line number
+        visible_line_num = len(self.entry_widgets) + 1
+        
+        # 2. Create and place line label (using UNIQUE grid row)
+        line_label = tk.Label(self.inner_frame, text=str(visible_line_num), bg="#D3D3D3")
+        line_label.grid(row=current_grid_row, column=0, sticky='w') 
+        
+        # 3. Create and place Entry widget (using UNIQUE grid row)
+        self.new_entry = tk.Entry(self.inner_frame, bg="white", width=50)
+        self.new_entry.grid(row=current_grid_row, column=1, padx=5, pady=2, sticky='ew') 
+        
+        # 4. Add to tracking lists
         self.entry_widgets.append(self.new_entry)
         self.line_labels.append(line_label)
         self.new_entry.focus_set()
-        self.new_entry.bind("<Return>", self.hit_enter) # if enter is 
-        self.new_entry.bind("<BackSpace>", self.hit_backspace) # if backspace is pressed
-        self.new_entry.bind("<Delete>", self.disable_run) # if delete is pressed
-        self.new_entry.bind("<Key>", self.disable_run) # if any key is pressed
         
-        # Update scroll region after adding a new widget
+        # 5. Bind events (no change)
+        self.new_entry.bind("<Return>", self.hit_enter)
+        self.new_entry.bind("<BackSpace>", self.hit_backspace)
+        self.new_entry.bind("<Delete>", self.disable_run)
+        self.new_entry.bind("<Key>", self.disable_run)
+        
+        # 6. Update scroll region (no change)
         self.inner_frame.update_idletasks()
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
+    def disable_run(self, event):
+        """Disable the Run button."""
+        self.runButton["state"] = "disabled"
 
 
     def check_program(self):
