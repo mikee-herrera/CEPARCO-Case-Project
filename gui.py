@@ -50,16 +50,81 @@ class RiscVGUI:
         status_bar.pack(side='bottom', fill='x')
 
     def create_program_tab(self):
-        """Create the program input tab."""
+        """Create the program input tab with a scrollable area."""
+        # Main Frame for the tab content
         self.frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
         self.notebook.add(self.frame, text="Program Input")
-        self.frame.columnconfigure(1, weight=1)
-        self.add_entry(event=None)
         
+        # 1. Create Canvas
+        self.canvas = tk.Canvas(self.frame, bg="#D3D3D3", highlightthickness=0)
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        # 2. Create Scrollbar and link it to the canvas
+        self.v_scrollbar = ttk.Scrollbar(self.frame, orient="vertical", command=self.canvas.yview)
+        self.v_scrollbar.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=self.v_scrollbar.set)
+        
+        # 3. Create a Frame inside the Canvas
+        # All program entries and line numbers will go into this inner frame.
+        self.inner_frame = tk.Frame(self.canvas, bg="#D3D3D3")
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
+        
+        # Configure the inner frame's column for expansion
+        self.inner_frame.columnconfigure(1, weight=1)
+        
+        # Bind events to update the scroll region
+        self.inner_frame.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+        self.add_entry(event=None)
+    
+    def _on_frame_configure(self, event):
+        """Update the scrollregion of the canvas when the size of the inner frame changes."""
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        """Update the inner frame width to fill the canvas width."""
+        self.canvas.itemconfig(self.canvas_window, width=self.canvas.winfo_width())
+
+    def _on_frame1_configure(self, event):
+        """Update the scrollregion of the canvas when the size of the inner frame changes."""
+        self.canvas1.configure(scrollregion=self.canvas1.bbox("all"))
+    
     def create_register_tab(self):
         """Create the register input tab."""
-        frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
-        self.notebook.add(frame, text="Register Input")
+        # Main Frame for the tab content
+        self.frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.frame, text="Register Tab")
+        
+        # 1. Create Canvas
+        self.canvas1 = tk.Canvas(self.frame, bg="#D3D3D3", highlightthickness=0)
+        self.canvas1.pack(side="left", fill="both", expand=True)
+
+        # 2. Create Scrollbar and link it to the canvas
+        self.v_scrollbar = ttk.Scrollbar(self.frame, orient="vertical", command=self.canvas1.yview)
+        self.v_scrollbar.pack(side="right", fill="y")
+        self.canvas1.configure(yscrollcommand=self.v_scrollbar.set)
+        
+        # 3. Create a Frame inside the Canvas
+        # All program entries and line numbers will go into this inner frame.
+        self.innerFrame = tk.Frame(self.canvas1, bg="#D3D3D3")
+        self.canvas_window = self.canvas1.create_window((0, 0), window=self.innerFrame, anchor="nw")
+        
+        # Configure the inner frame's column for expansion
+        self.innerFrame.columnconfigure(1, weight=1)
+        ttk.Label(self.innerFrame, text="Reg", font=('Arial', 10, 'bold'),anchor="center").grid(row=0, column=0, padx=5, pady=5,sticky='ew')
+        ttk.Label(self.innerFrame, text="Value (Hex)", font=('Arial', 10, 'bold'), anchor="center").grid(row=0, column=1, pady=5,sticky='ew')
+        for i in range(32):
+            reg_name = f"x{i}"
+
+            ttk.Label(self.innerFrame, text=reg_name).grid(row=i + 1, column=0, padx=5, sticky='w')
+
+            entry = tk.Entry(self.innerFrame, width=15)
+            entry.grid(row=i + 1, column=1, padx=5, pady=1)
+            entry.insert(i, "0x00000000")
+            entry.config(state='readonly', bg='#D3D3D3')
+        # Bind events to update the scroll region
+        self.innerFrame.bind("<Configure>", self._on_frame1_configure)
     
     def create_memory_tab(self):
         """Create the memory input tab."""
@@ -213,8 +278,8 @@ class RiscVGUI:
         imm_bin = self.imm_to_bin(imm, 12)
         
         # S-type immediate is split: imm[11:5] + imm[4:0]
-        imm_11_5 = imm_bin[0:7]   # bits 11-5
-        imm_4_0 = imm_bin[7:12]   # bits 4-0
+        imm_11_5 = imm_bin[0:7]  # bits 11-5
+        imm_4_0 = imm_bin[7:12]  # bits 4-0
         
         binary = imm_11_5 + rs2 + rs1 + funct3 + imm_4_0 + opcode
         
@@ -415,7 +480,7 @@ class RiscVGUI:
         if opcodes:
             header = "μRISCV OPCODE OUTPUT\n"
             header += "=" * 60 + "\n"
-            header += "Address   Opcode     Instruction\n"
+            header += "Address   Opcode      Instruction\n"
             header += "=" * 60 + "\n"
             self.opcode_text.insert(tk.END, header)
             
@@ -442,7 +507,25 @@ class RiscVGUI:
             # if the current entry is not the last then it will focus on the next entry
             if((widget_index + 1) < self.entry_row_count):
                 self.entry_widgets[widget_index + 1].focus_set()
-    
+        
+        # After adding a new line, ensure the new line is visible
+        if widget_index == last_index and self.entry_row_count > 1:
+            # Scroll down to make the new entry visible
+            self.canvas.yview_moveto(1.0) # Move to the bottom
+    def hit_backspace(self,event):
+        current_entry = event.widget
+        try:
+            widget_index = self.entry_widgets.index(current_entry)
+        except ValueError:
+            print("Error")
+        last_index =self.entry_row_count - 1
+        # this means is the top entry
+        if widget_index != 0 and not current_entry.get():
+            self.entry_widgets[widget_index - 1].focus_set()
+        if (self.runButton["state"] == "NORMAL"):
+            self.runButton["state"] = "disabled"
+        if widget_index == 0 and self.entry_row_count > 1:
+            self.canvas.yview_moveto(0.0)
     def disable_run(self, event):
         """Disable the Run button."""
         self.runButton["state"] = "disabled"
@@ -452,19 +535,24 @@ class RiscVGUI:
         self.entry_row_count += 1
         current_row = self.entry_row_count
         # for row indicator 
-        line_label = tk.Label(self.frame, text=str(current_row))
+        line_label = tk.Label(self.inner_frame, text=str(current_row), bg="#D3D3D3")
         line_label.grid(row=current_row, column=0, sticky='w')
         # text input field
-        self.new_entry = tk.Entry(self.frame, bg="#D3D3D3", width=50)
-        self.new_entry.grid(row=current_row, column=1, padx=(5,0), pady=2, sticky='ew')
+        self.new_entry = tk.Entry(self.inner_frame, bg="white", width=50) # Changed background to white for better visibility
+        self.new_entry.grid(row=current_row, column=1, padx=5, pady=2, sticky='ew')
         # add it to widget list so that it can be get() and will be process later
         self.entry_widgets.append(self.new_entry)
         self.line_labels.append(line_label)
         self.new_entry.focus_set()
         self.new_entry.bind("<Return>", self.hit_enter) # if enter is 
-        self.new_entry.bind("<BackSpace>", self.disable_run) # if backspace is pressed
+        self.new_entry.bind("<BackSpace>", self.hit_backspace) # if backspace is pressed
         self.new_entry.bind("<Delete>", self.disable_run) # if delete is pressed
         self.new_entry.bind("<Key>", self.disable_run) # if any key is pressed
+        
+        # Update scroll region after adding a new widget
+        self.inner_frame.update_idletasks()
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
 
     def check_program(self):
         """Check the program for errors and display results."""
@@ -550,8 +638,14 @@ class RiscVGUI:
                 return f"Line {line_num}: Invalid source register '{rs2}' in SW"
             
             # Check offset(rs1) format
-            if not re.match(r'.*\(.*\)', offset_rs1):
+            # This is a basic check. A more robust check would parse offset and rs1.
+            match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1)
+            if not match:
                 return f"Line {line_num}: Invalid memory operand format '{offset_rs1}' in SW"
+            
+            # Validate the rs1 inside the parentheses
+            if not REGISTER_PATTERN.match(match.group(2)):
+                 return f"Line {line_num}: Invalid base register '{match.group(2)}' in SW"
             
             return None
             
@@ -583,8 +677,13 @@ class RiscVGUI:
                 if not REGISTER_PATTERN.match(parts[1]):
                     return f"Line {line_num}: Invalid destination register '{parts[1]}' in LW"
                 # Check offset(rs1) format
-                if not re.match(r'.*\(.*\)', parts[2]):
-                    return f"Line {line_num}: Invalid memory operand format '{parts[2]}' in LW"
+                # A robust check of the format, including offset and rs1 validation
+                offset_rs1_part = parts[2]
+                match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1_part)
+                if not match:
+                    return f"Line {line_num}: Invalid memory operand format '{offset_rs1_part}' in LW"
+                if not REGISTER_PATTERN.match(match.group(2)):
+                    return f"Line {line_num}: Invalid base register '{match.group(2)}' in LW"
             else:  # ORI
                 if len(parts) != 4:
                     return f"Line {line_num}: ORI requires 3 operands (rd, rs1, immediate)"
@@ -595,14 +694,16 @@ class RiscVGUI:
                     
         elif mnemonic in B_TYPE:  # BLT, BGE
             if len(parts) != 4:
-                return f"Line {line_num}: {mnemonic} requires 3 operands (rs1, rs2, offset)"
+                return f"Line {line_num}: {mnemonic} requires 3 operands (rs1, rs2, offset/label)"
             for i in range(1, 3):  # First two operands are registers
                 if not REGISTER_PATTERN.match(parts[i]):
                     return f"Line {line_num}: Invalid register '{parts[i]}' in {mnemonic}"
-            # Third operand can be immediate or label (basic check)
-            if not (IMMEDIATE_PATTERN.match(parts[3]) or HEX_PATTERN.match(parts[3])):
-                # Might be a label - we'll assume it's valid for now
-                pass
+            # Third operand can be immediate (for offset) or label
+            imm_or_label = parts[3]
+            is_immediate = IMMEDIATE_PATTERN.match(imm_or_label) or HEX_PATTERN.match(imm_or_label)
+            is_label = re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', imm_or_label)
+            if not (is_immediate or is_label):
+                return f"Line {line_num}: Invalid offset or label '{imm_or_label}' in {mnemonic}"
                 
         elif mnemonic in DIRECTIVE:  # .WORD
             if len(parts) != 2:
