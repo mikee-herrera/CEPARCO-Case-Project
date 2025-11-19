@@ -128,6 +128,14 @@ class RiscVGUI:
                 entry.bind('<FocusOut>', lambda e, reg=i: self.update_register_value(reg))
         self.innerFrame.bind("<Configure>", self._on_frame1_configure)
 
+        # ---- ADD PC display ----
+        ttk.Label(self.innerFrame, text="PC").grid(row=33, column=0, padx=5, sticky='w')
+        self.pc_entry = tk.Entry(self.innerFrame, width=15)
+        self.pc_entry.grid(row=33, column=1, padx=5, pady=1)
+        self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
+        self.pc_entry.config(state='readonly')
+        
+
     def update_register_value(self, reg):
         try:
             entry = self.reg_entries[reg]
@@ -288,52 +296,123 @@ class RiscVGUI:
     # -------------------------
     # Pipeline: core functions
     # -------------------------
+    
     def step_execution(self):
         """
-        Perform ONE pipeline cycle.
-        Order (per cycle): WB -> MEM -> EX -> ID -> IF
+        Perform ONE pipeline cycle (WB -> MEM -> EX -> ID -> IF).
+        Stops when the pipeline has reached the same "final visible state" as Run (Option A):
+        - no more instructions to fetch (PC not in program_memory)
+        - IF/ID, ID/EX, EX/MEM are empty
+        In that final state MEM/WB still contains the last committed instruction (visible).
+        When this final step finishes, behave like Run: generate opcodes, update displays, disable Run/Step.
         """
+
+        # Ensure program is loaded
         if not self.program_memory:
             self.load_program_to_memory()
         if not self.program_memory:
             messagebox.showwarning("No Program", "No valid program to execute")
             return
 
-        # Termination check: if pipeline is empty and no more fetch, stop stepping
+        # Evaluate "no more fetch" and earlier-stage emptiness BEFORE doing a step.
         no_more_fetch = (self.pipeline_state['PC'] not in self.program_memory)
         earlier_stages_empty = (
             self.pipeline_state['IF_ID'].get('IR', 0) == 0 and
             self.pipeline_state['ID_EX'].get('IR', 0) == 0 and
-            self.pipeline_state['EX_MEM'].get('IR', 0) == 0 and
-            self.pipeline_state['MEM_WB'].get('IR', 0) == 0
+            self.pipeline_state['EX_MEM'].get('IR', 0) == 0
         )
+
+        # If we are already at the final visible state, do NOT allow another step.
+        # (This prevents the extra blanking step that previously emptied MEM/WB.)
         if no_more_fetch and earlier_stages_empty:
-            messagebox.showinfo("Done", "Pipeline is empty. Nothing to step.")
+            messagebox.showinfo("Done", "Pipeline already completed. No further steps.")
             return
 
-        # perform one cycle
+        # Prime pipeline the same way Run does on first cycle so Step and Run match.
+        # If first cycle (cycle_count == 0) and IF_ID empty, fetch first inst.
+        if self.cycle_count == 0 and self.pipeline_state['IF_ID'].get('IR', 0) == 0:
+            pc0 = self.pipeline_state['PC']
+            if pc0 in self.program_memory:
+                self.pipeline_state['IF_ID']['IR'] = self.program_memory[pc0]
+                self.pipeline_state['IF_ID']['NPC'] = (pc0 + 4) & 0xFFFFFFFF
+                self.pipeline_state['PC'] = (pc0 + 4) & 0xFFFFFFFF
+
+        # ---- perform one pipeline cycle ----
         self.cycle_count += 1
 
-        # 1) Write Back: commit MEM/WB -> registers
+        # 1) Write-back
         self.write_back()
 
-        # 2) Memory stage: operate on EX/MEM and fill MEM/WB
+        # 2) Memory stage
         self.memory_access()
 
-        # 3) Execute stage: use ID/EX to compute ALU results, branch decisions.
-        ex_mem_new = self.execute_current_instruction()  # returns dict for EX/MEM
-
-        # detect branch taken by EX stage (ex_mem_new.cond == 1)
+        # 3) Execute stage => produces EX/MEM dict
+        ex_mem_new = self.execute_current_instruction()
         branch_taken = (ex_mem_new.get('cond', 0) == 1)
 
-        # 4) Advance pipeline registers (this also fetches IF for next cycle)
+        # 4) Advance pipeline (handles freeze on branch)
         self.pipeline_advance(ex_mem_new=ex_mem_new, branch_taken=branch_taken)
 
-        # GUI updates
+        # 5) GUI updates
         self.update_register_display()
         self.update_memory_display()
         self.update_pipeline_display()
-        self.status_var.set(f"Cycle: {self.cycle_count} - PC: 0x{self.pipeline_state['PC']:04x}")
+
+        # update PC widget if present
+        try:
+            self.pc_entry.config(state='normal')
+            self.pc_entry.delete(0, tk.END)
+            self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
+            self.pc_entry.config(state='readonly')
+        except Exception:
+            # pc_entry might not exist if you didn't add it — ignore silently
+            pass
+
+        self.status_var.set(f"Cycle: {self.cycle_count} - PC: 0x{self.pipeline_state['PC']:08x}")
+
+        # ---- After the cycle, check if we've reached the final visible stop condition ----
+        no_more_fetch = (self.pipeline_state['PC'] not in self.program_memory)
+        earlier_stages_empty = (
+            self.pipeline_state['IF_ID'].get('IR', 0) == 0 and
+            self.pipeline_state['ID_EX'].get('IR', 0) == 0 and
+            self.pipeline_state['EX_MEM'].get('IR', 0) == 0
+        )
+
+        # If we've drained IF/ID, ID/EX, EX/MEM and there's nothing left to fetch,
+        # then we are in the final visible state (MEM/WB still contains last instruction).
+        if no_more_fetch and earlier_stages_empty:
+            # Finalize exactly like Run: generate opcodes, show opcode tab, disable buttons
+            instructions = []
+            for i, entry in enumerate(self.entry_widgets):
+                line_text = entry.get().strip()
+                if line_text:
+                    instructions.append((i + 1, line_text))
+
+            if instructions:
+                opcodes = self.generate_opcodes(instructions)
+                self.display_opcodes(opcodes)
+                # switch to opcode output tab (index may differ — you used select(3) earlier)
+                try:
+                    self.notebook.select(3)
+                except Exception:
+                    pass
+
+            self.status_var.set("Step finished: program complete. Opcodes generated.")
+            self.is_running = False
+
+            # Disable run/step to prevent extra blanking step
+            try:
+                self.runButton["state"] = "disabled"
+                self.stepButton["state"] = "disabled"
+            except Exception:
+                pass
+
+            messagebox.showinfo("Run Complete", "Program executed successfully by stepping. Check Opcode Output tab.")
+            return
+
+        # otherwise allow further stepping (do nothing special)
+        return
+
 
     def memory_access(self):
         ex = self.pipeline_state['EX_MEM']
@@ -407,53 +486,59 @@ class RiscVGUI:
 
     def pipeline_advance(self, ex_mem_new=None, branch_taken=False):
         """
-        Shift stages:
-         MEM_WB <= EX_MEM(old)
-         EX_MEM <= ex_mem_new (from EX stage)
-         ID_EX  <= IF_ID
-         IF_ID  <= fetched instruction from PC (if available and not frozen)
-        If branch_taken: insert bubble in ID_EX and freeze IF_ID (do not fetch).
+        Advance pipeline one cycle:
+        MEM_WB <= old EX_MEM
+        EX_MEM <= ex_mem_new (from EX stage)
+        ID_EX  <= IF_ID
+        IF_ID  <= fetched instruction OR frozen on branch
         """
-        # MEM_WB <= old EX_MEM
+        # --- 1. Capture old EX_MEM for MEM_WB update ---
         old_ex = self.pipeline_state['EX_MEM'].copy()
+
+        # --- 2. MEM_WB should preserve whatever MEM stage wrote this cycle ---
+        memwb_lmd = self.pipeline_state['MEM_WB'].get('LMD', 0)
+
         self.pipeline_state['MEM_WB'] = {
-            'LMD': self.pipeline_state['MEM_WB'].get('LMD', 0),  # preserve LMD until MEM stage wrote it
-            'IR': old_ex.get('IR', 0),
-            'ALUOUTPUT': old_ex.get('ALUOUTPUT', 0)
+            'LMD': memwb_lmd,                        # from memory_access()
+            'IR': old_ex.get('IR', 0),               # pass down old EX instruction
+            'ALUOUTPUT': old_ex.get('ALUOUTPUT', 0)  # pass down ALU result
         }
 
-        # EX_MEM <= new result from EX stage
-        if ex_mem_new is not None:
-            # Ensure keys exist
+        # --- 3. Insert new EX_MEM from EX stage ---
+        if ex_mem_new is None:
+            # default NOP
             self.pipeline_state['EX_MEM'] = {
-                'ALUOUTPUT': ex_mem_new.get('ALUOUTPUT', 0),
-                'cond': ex_mem_new.get('cond', 0),
-                'IR': ex_mem_new.get('IR', 0),
-                'B': ex_mem_new.get('B', 0)
+                'ALUOUTPUT': 0,
+                'cond': 0,
+                'IR': 0,
+                'B': 0
             }
         else:
-            # If nothing computed, propagate ID_EX -> EX_MEM (safe default)
-            idex = self.pipeline_state['ID_EX'].copy()
-            self.pipeline_state['EX_MEM'] = {'ALUOUTPUT': idex.get('IMM', 0), 'cond': 0, 'IR': idex.get('IR', 0), 'B': idex.get('B', 0)}
+            # ✔ FIX B: correctly forward all EX outputs
+            self.pipeline_state['EX_MEM'] = ex_mem_new.copy()
 
+        # --- 4. If branch taken: freeze IF_ID and insert bubble into ID_EX ---
         if branch_taken:
-            # Insert bubble into ID/EX, freeze IF/ID (do not fetch)
+            # ID_EX becomes bubble
             self.pipeline_state['ID_EX'] = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
-            # IF_ID remains as is (frozen)
+
+            # IF_ID is FROZEN — DO NOT FETCH A NEW INSTRUCTION
             return
 
-        # Normal flow: ID_EX <= IF_ID
+        # --- 5. Normal pipeline flow: ID_EX <= old IF_ID ---
         self.pipeline_state['ID_EX'] = self.pipeline_state['IF_ID'].copy()
 
-        # Fetch new instruction into IF_ID (if available)
+        # --- 6. Fetch next instruction into IF_ID ---
         pc = self.pipeline_state['PC']
         if pc in self.program_memory:
-            self.pipeline_state['IF_ID']['IR'] = self.program_memory[pc]
-            self.pipeline_state['IF_ID']['NPC'] = (pc + 4) & 0xFFFFFFFF
-            # advance PC after fetch
+            self.pipeline_state['IF_ID'] = {
+                'IR': self.program_memory[pc],
+                'NPC': (pc + 4) & 0xFFFFFFFF
+            }
+            # PC increments only after successful fetch
             self.pipeline_state['PC'] = (pc + 4) & 0xFFFFFFFF
         else:
-            # No instruction to fetch
+            # No instruction to fetch → insert bubble
             self.pipeline_state['IF_ID'] = {'IR': 0, 'NPC': 0}
 
     def execute_current_instruction(self):
@@ -546,57 +631,114 @@ class RiscVGUI:
     # Non-pipeline (assembler) helpers
     # -------------------------
     def load_program_to_memory(self):
-        self.program_memory = {}
-        self.next_data_addr = DATA_START
-        current_pc = PROG_START
+        """
+        Properly loads validated instructions into program_memory.
+        Performs:
+            1. Extract non-empty lines
+            2. First pass: collect labels & their addresses
+            3. Second pass: encode instructions
+            4. Write encoded 32-bit words into program_memory
+        """
+        PROG_START = 0x80
+        address = PROG_START
 
-        instructions = []
+        # Clear program memory
+        self.program_memory.clear()
+
+        # ---- COLLECT NON-EMPTY INSTRUCTIONS ----
+        lines = []
         for i, entry in enumerate(self.entry_widgets):
-            line_text = entry.get().strip()
-            if line_text:
-                instructions.append((i + 1, line_text))
+            text = entry.get().strip()
+            if text:
+                lines.append((i + 1, text))  # (line#, text)
 
-        opcodes = self.generate_opcodes(instructions)
+        if not lines:
+            return False
 
-        for opcode_line in opcodes:
-            if '[LABEL]' in opcode_line:
-                continue
+        # ---- FIRST PASS: LABEL COLLECTION ----
+        labels = {}
+        pc = PROG_START
 
-            parts = opcode_line.split(':')
-            if len(parts) < 2:
-                continue
+        for line_num, text in lines:
+            clean = text.split("#")[0].strip()
 
-            addr_hex = parts[0].strip()
-            content  = parts[1].strip()
+            if ":" in clean:
+                label = clean.split(":")[0].strip()
+                labels[label] = pc
 
-            # detect directive
-            comment_idx = opcode_line.find('//')
-            comment = opcode_line[comment_idx+2:].strip() if comment_idx != -1 else ""
+                # If instruction exists after label, it occupies one word
+                inst_after = clean.split(":")[1].strip()
+                if inst_after:
+                    pc += 4
+            else:
+                pc += 4
 
+        # ---- SECOND PASS: ENCODING ----
+        pc = PROG_START
+        for line_num, text in lines:
+            clean = text.split("#")[0].strip()
+
+            # Separate label from instruction (robust parsing)
+            if ":" in clean:
+                before, after = clean.split(":", 1)
+                label = before.strip()
+                inst = after.strip()
+
+                # Skip label-only lines (e.g., "LOOP:" or "LOOP:   ")
+                if inst == "" or inst.isspace():
+                    continue
+
+                # Continue with the actual instruction text
+                clean = inst
+
+
+            # Normalize SW format (your parser requires special handling)
+            if clean.upper().startswith("SW"):
+                parts = clean.split()
+                mnemonic = parts[0].upper()
+                rs2 = parts[1].rstrip(',')
+                offset_rs1 = " ".join(parts[2:])
+                operands = [rs2, offset_rs1]
+            else:
+                parts = re.split(r'[,\s()]+', clean)
+                parts = [p for p in parts if p]
+                mnemonic = parts[0].upper()
+                operands = parts[1:]
+
+            # ---- ENCODE USING EXISTING ENCODERS ----
             try:
-                hex_str = content.split()[0]
-                value = int(hex_str, 16)
-            except:
-                continue
+                if mnemonic in R_TYPE:
+                    hex_opcode = self.encode_r_type(mnemonic, operands)
 
-            # CASE 1: DIRECTIVE (.WORD)
-            if comment.upper().startswith('.WORD'):
-                if self.next_data_addr + 3 <= DATA_END:
-                    self.write_word(self.next_data_addr, value)
-                    self.next_data_addr += 4
+                elif mnemonic in I_TYPE:
+                    hex_opcode = self.encode_i_type(mnemonic, operands)
+
+                elif mnemonic in S_TYPE:
+                    hex_opcode = self.encode_s_type(mnemonic, operands)
+
+                elif mnemonic in B_TYPE:
+                    # Label resolution
+                    if len(operands) >= 3 and operands[2] in labels:
+                        offset = labels[operands[2]] - pc
+                        operands = operands[0:2] + [str(offset)]
+                    hex_opcode = self.encode_b_type(mnemonic, operands)
+
+                elif mnemonic == ".WORD":
+                    hex_opcode = self.encode_directive(mnemonic, operands[0])
+
                 else:
-                    messagebox.showerror("Error",
-                        "Data segment overflow (0x0000–0x007F)")
-                continue
+                    raise ValueError(f"Unsupported instruction {mnemonic}")
 
-            # CASE 2: INSTRUCTION -> program memory
-            try:
-                addr = int(addr_hex, 16)
-                if PROG_START <= addr <= PROG_END:
-                    self.program_memory[addr] = value
-            except:
-                continue
+            except Exception as e:
+                messagebox.showerror("Encoding Error", f"Line {line_num}: {e}")
+                return False
 
+            # Store encoded instruction as 32-bit integer
+            self.program_memory[pc] = int(hex_opcode, 16)
+
+            pc += 4
+
+        return True
 
     def create_pipeline_tab(self):
         self.pipeline_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
@@ -611,6 +753,12 @@ class RiscVGUI:
             self.reg_entries[i].delete(0, tk.END)
             self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
             self.reg_entries[i].config(state='readonly')
+        # ---- UPDATE PC display ----
+        self.pc_entry.config(state='normal')
+        self.pc_entry.delete(0, tk.END)
+        self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
+        self.pc_entry.config(state='readonly')
+
 
     def update_pipeline_display(self):
         self.pipeline_text.config(state=tk.NORMAL)
@@ -700,7 +848,7 @@ class RiscVGUI:
             if pipeline_empty and pc_done:
                 break
 
-        # generate opcodes (existing behavior)
+        # generate opcodes 
         instructions = []
         for i, entry in enumerate(self.entry_widgets):
             line_text = entry.get().strip()
@@ -716,7 +864,7 @@ class RiscVGUI:
         self.is_running = False
 
     # -------------------------
-    # Assembler/encoding & validation (unchanged)
+    # Assembler/encoding & validation 
     # -------------------------
     def reg_to_bin(self, reg):
         if not REGISTER_PATTERN.match(reg):
