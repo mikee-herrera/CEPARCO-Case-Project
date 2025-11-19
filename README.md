@@ -11,7 +11,7 @@ Minimum directive: .word
 # Video Demo:
 https://drive.google.com/file/d/11MM2coCsVog75gngo4BsEMJZ_NPTL_fR/view?usp=sharing
 ---
-## Milestone 2
+## Milestone #2
 - [x] GUI (registers, memory)
 - [x] Initial execution draft
 # Video Demo:
