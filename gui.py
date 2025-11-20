@@ -693,7 +693,7 @@ class RiscVGUI:
 
 
             # Normalize SW format (your parser requires special handling)
-            if clean.upper().startswith("SW"):
+            if clean.upper().startswith("SW") or clean.upper().startswith("LW"):
                 parts = clean.split()
                 mnemonic = parts[0].upper()
                 rs2 = parts[1].rstrip(',')
@@ -997,7 +997,7 @@ class RiscVGUI:
                 instruction_part = clean_instruction.split(':')[1].strip() if len(clean_instruction.split(':')) > 1 else ""
                 opcodes.append(f"0x{current_pc:04x}: [LABEL] {label_part}:")
                 if instruction_part:
-                    if instruction_part.upper().startswith('SW'):
+                    if instruction_part.upper().startswith('SW') or instruction_part.upper().startswith('LW'):
                         parts = instruction_part.split()
                         mnemonic = parts[0].upper()
                         rs2 = parts[1].rstrip(',')
@@ -1033,17 +1033,21 @@ class RiscVGUI:
                             opcodes.append(f"0x{current_pc:04x}: ERROR - {str(e)} // {instruction_part}")
                             current_pc += 4
             else:
-                if clean_instruction.upper().startswith('SW'):
-                    parts = clean_instruction.split()
+                upper = instruction_part.upper()
+                # Handle LW/SW properly inside labels
+                if upper.startswith("LW") or upper.startswith("SW"):
+                    parts = instruction_part.split()
                     mnemonic = parts[0].upper()
-                    rs2 = parts[1].rstrip(',')
+                    reg = parts[1].rstrip(',')
                     offset_rs1 = ' '.join(parts[2:])
-                    operands = [rs2, offset_rs1]
+                    operands = [reg, offset_rs1]
+
                 else:
-                    parts = re.split(r'[,\s()]+', clean_instruction)
+                    parts = re.split(r'[,\s()]+', instruction_part)
                     parts = [p for p in parts if p]
                     mnemonic = parts[0].upper()
                     operands = parts[1:]
+
                 if not parts:
                     continue
                 try:
@@ -1223,6 +1227,9 @@ class RiscVGUI:
                 if not REGISTER_PATTERN.match(parts[1]):
                     return f"Line {line_num}: Invalid destination register '{parts[1]}' in LW"
                 offset_rs1_part = parts[2]
+                if IMMEDIATE_PATTERN.match(offset_rs1_part) or HEX_PATTERN.match(offset_rs1_part):
+                    parts[2] = f"{offset_rs1_part}(x0)"
+                    offset_rs1_part = parts[2]
                 match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1_part)
                 if not match:
                     return f"Line {line_num}: Invalid memory operand format '{offset_rs1_part}' in LW"
