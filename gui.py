@@ -44,8 +44,8 @@ class RiscVGUI:
         # Pipeline state - keep same fields your GUI expects
         self.pipeline_state = {
             'PC': 0x0080,
-            'IF_ID': {'IR': 0, 'NPC': 0},
-            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},  # Added PC
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},  # Already has A, B, IMM
             'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
             'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
         }
@@ -277,7 +277,7 @@ class RiscVGUI:
     def reset_simulation(self):
         self.pipeline_state = {
             'PC': 0x0080,
-            'IF_ID': {'IR': 0, 'NPC': 0},
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},  # Added PC
             'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
             'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
             'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
@@ -328,14 +328,7 @@ class RiscVGUI:
             messagebox.showinfo("Done", "Pipeline already completed. No further steps.")
             return
 
-        # Prime pipeline the same way Run does on first cycle so Step and Run match.
-        # If first cycle (cycle_count == 0) and IF_ID empty, fetch first inst.
-        if self.cycle_count == 0 and self.pipeline_state['IF_ID'].get('IR', 0) == 0:
-            pc0 = self.pipeline_state['PC']
-            if pc0 in self.program_memory:
-                self.pipeline_state['IF_ID']['IR'] = self.program_memory[pc0]
-                self.pipeline_state['IF_ID']['NPC'] = (pc0 + 4) & 0xFFFFFFFF
-                self.pipeline_state['PC'] = (pc0 + 4) & 0xFFFFFFFF
+        
 
         # ---- perform one pipeline cycle ----
         self.cycle_count += 1
@@ -486,11 +479,7 @@ class RiscVGUI:
 
     def pipeline_advance(self, ex_mem_new=None, branch_taken=False):
         """
-        Advance pipeline one cycle:
-        MEM_WB <= old EX_MEM
-        EX_MEM <= ex_mem_new (from EX stage)
-        ID_EX  <= IF_ID
-        IF_ID  <= fetched instruction OR frozen on branch
+        Advance pipeline one cycle with added PC in IF_ID and ensure ID/EX.A, ID/EX.B, ID/EX.Imm are properly set
         """
         # --- 1. Capture old EX_MEM for MEM_WB update ---
         old_ex = self.pipeline_state['EX_MEM'].copy()
@@ -514,32 +503,76 @@ class RiscVGUI:
                 'B': 0
             }
         else:
-            # ✔ FIX B: correctly forward all EX outputs
             self.pipeline_state['EX_MEM'] = ex_mem_new.copy()
 
         # --- 4. If branch taken: freeze IF_ID and insert bubble into ID_EX ---
         if branch_taken:
             # ID_EX becomes bubble
             self.pipeline_state['ID_EX'] = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
-
             # IF_ID is FROZEN — DO NOT FETCH A NEW INSTRUCTION
             return
 
         # --- 5. Normal pipeline flow: ID_EX <= old IF_ID ---
-        self.pipeline_state['ID_EX'] = self.pipeline_state['IF_ID'].copy()
+        # Copy IF_ID to ID_EX and also set ID/EX.A, ID/EX.B, ID/EX.Imm from register file
+        old_if_id = self.pipeline_state['IF_ID'].copy()
+        self.pipeline_state['ID_EX'] = old_if_id.copy()
+        
+        # Extract register values for ID/EX.A and ID/EX.B if there's an instruction
+        if old_if_id.get('IR', 0):
+            instruction = old_if_id['IR'] & 0xFFFFFFFF
+            inst_bin = format(instruction, '032b')
+            
+            # Extract rs1 and rs2 fields
+            rs1 = int(inst_bin[12:17], 2)
+            rs2 = int(inst_bin[7:12], 2)
+            
+            # Set ID/EX.A and ID/EX.B from register file
+            self.pipeline_state['ID_EX']['A'] = REGISTER_FILE.get(rs1, 0)
+            self.pipeline_state['ID_EX']['B'] = REGISTER_FILE.get(rs2, 0)
+            
+            # Set ID/EX.Imm (sign-extended immediate)
+            # Handle different immediate formats based on instruction type
+            opcode = inst_bin[25:32]
+            
+            if opcode in ["0010011", "0000011"]:  # I-type
+                imm_i = int(inst_bin[0:12], 2)
+                if inst_bin[0] == '1':
+                    imm_i = imm_i - (1 << 12)
+                self.pipeline_state['ID_EX']['IMM'] = imm_i & 0xFFFFFFFF
+                
+            elif opcode == "0100011":  # S-type
+                imm_s = int(inst_bin[0:7] + inst_bin[20:25], 2)
+                if inst_bin[0] == '1':
+                    imm_s = imm_s - (1 << 12)
+                self.pipeline_state['ID_EX']['IMM'] = imm_s & 0xFFFFFFFF
+                
+            elif opcode == "1100011":  # B-type
+                imm_b = int(inst_bin[0] + inst_bin[24] + inst_bin[1:7] + inst_bin[20:24], 2)
+                if inst_bin[0] == '1':
+                    imm_b = imm_b - (1 << 13)
+                self.pipeline_state['ID_EX']['IMM'] = imm_b & 0xFFFFFFFF
+                
+            else:  # R-type or other
+                self.pipeline_state['ID_EX']['IMM'] = 0
+        else:
+            # No instruction, clear A, B, IMM
+            self.pipeline_state['ID_EX']['A'] = 0
+            self.pipeline_state['ID_EX']['B'] = 0
+            self.pipeline_state['ID_EX']['IMM'] = 0
 
         # --- 6. Fetch next instruction into IF_ID ---
         pc = self.pipeline_state['PC']
         if pc in self.program_memory:
             self.pipeline_state['IF_ID'] = {
                 'IR': self.program_memory[pc],
-                'NPC': (pc + 4) & 0xFFFFFFFF
+                'NPC': (pc + 4) & 0xFFFFFFFF,
+                'PC': pc  # Store the PC value in IF/ID
             }
             # PC increments only after successful fetch
             self.pipeline_state['PC'] = (pc + 4) & 0xFFFFFFFF
         else:
             # No instruction to fetch → insert bubble
-            self.pipeline_state['IF_ID'] = {'IR': 0, 'NPC': 0}
+            self.pipeline_state['IF_ID'] = {'IR': 0, 'NPC': 0, 'PC': 0}
 
     def execute_current_instruction(self):
         """
@@ -818,20 +851,33 @@ class RiscVGUI:
         # reset pipeline and PC to known starting state
         self.pipeline_state = {
             'PC': PROG_START,
-            'IF_ID': {'IR': 0, 'NPC': 0},
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},  # Added PC
             'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
             'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
             'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
         }
         self.cycle_count = 0
 
-        # Prime pipeline by fetching first instruction if present
+        # ---- PRIME PIPELINE: cycle 1 = IF only ----
         pc = self.pipeline_state['PC']
         if pc in self.program_memory:
-            self.pipeline_state['IF_ID']['IR'] = self.program_memory[pc]
-            self.pipeline_state['IF_ID']['NPC'] = (pc + 4) & 0xFFFFFFFF
+            self.pipeline_state['IF_ID'] = {
+                'IR': self.program_memory[pc],
+                'NPC': (pc + 4) & 0xFFFFFFFF,
+                'PC': pc
+            }
+            # DO NOT touch ID/EX (should remain bubble)
             self.pipeline_state['PC'] = (pc + 4) & 0xFFFFFFFF
+        else:
+            self.pipeline_state['IF_ID'] = {'IR': 0, 'NPC': 0, 'PC': 0}
 
+
+        # Update display to show Cycle 1 with instruction in IF/ID
+        self.update_pipeline_display()
+        self.update_register_display()
+        self.root.update()
+
+        # Now start the execution cycles from Cycle 1
         while True:
             self.step_execution()
             self.root.update()
@@ -862,7 +908,6 @@ class RiscVGUI:
         self.status_var.set("Program executed - Opcodes generated")
         messagebox.showinfo("Run Complete", "Program executed successfully! Check Opcode Output tab.")
         self.is_running = False
-
     # -------------------------
     # Assembler/encoding & validation 
     # -------------------------
