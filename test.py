@@ -1,0 +1,1279 @@
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox, Button
+from tkinter.constants import DISABLED, NORMAL
+import re
+
+# ============================================================
+# μRISCV Project 
+# ============================================================
+
+# ===== MEMORY LAYOUT CONSTANTS (REQUIRED BY SPEC) =====
+DATA_START = 0x0000
+DATA_END   = 0x007F    # 128 bytes
+PROG_START = 0x0080
+PROG_END   = 0x00FF
+
+
+# Supported instructions (Group 2,5: LW, SW, AND, OR, ORI, BLT, BGE)
+R_TYPE = {"AND": {"0110011": "111"}, "OR": {"0110011": "110"}}
+I_TYPE = {"ORI": {"0010011": "110"}, "LW": {"0000011": "010"}}
+S_TYPE = {"SW": {"0100011": "010"}}
+B_TYPE = {"BLT": {"1100011": "100"}, "BGE": {"1100011": "101"}}
+DIRECTIVE = {".WORD"}
+SUPPORTED_INSTRUCTIONS = set(R_TYPE.keys()) | set(I_TYPE.keys()) | set(S_TYPE.keys()) | set(B_TYPE.keys()) | DIRECTIVE
+
+# Architectural registers
+REGISTER_FILE = {i: 0 for i in range(32)}
+REGISTER_FILE[0] = 0
+
+# Patterns
+REGISTER_PATTERN = re.compile(r'^x([0-9]|[1-2][0-9]|3[0-1])$')
+IMMEDIATE_PATTERN = re.compile(r'^-?[0-9]+$')
+HEX_PATTERN = re.compile(r'^0x[0-9a-fA-F]+$')
+
+class RiscVGUI:
+    def __init__(self, root):
+        self.reg_entries = {}
+        self.entry_row_count = 0
+        self.entry_widgets = []
+        self.line_labels = []
+        self.root = root
+        self.root.title("μRISCV Assembler Simulator - Fixed")
+        self.root.geometry("980x700")
+
+        self.pipeline_state = {
+            'PC': PROG_START,
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
+            'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
+            'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
+        }
+
+        self.cycle_count = 0
+        self.is_running = False
+        self.program_memory = {}
+
+        # Expanded memory range: 0x0000 .. 0x01FF (word addresses shown 0x0000..0x01FC)
+        self.memory_low = DATA_START
+        self.memory_high = PROG_END
+        self.memory = {addr: 0 for addr in range(self.memory_low, self.memory_high + 1)}  # byte addressed storage
+        self.memory_entries = {}
+
+        self.create_buttons()
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        self.create_program_tab()
+        self.create_register_tab()
+        self.create_memory_tab()
+        self.create_opcode_tab()
+        self.create_pipeline_tab()
+
+        self.status_var = tk.StringVar()
+        self.status_var.set("Made by Sean Regindin, Marvien Castillo, Mikaela Herrera - FIXED")
+        status_bar = ttk.Label(root, textvariable=self.status_var, relief='sunken')
+        status_bar.pack(side='bottom', fill='x')
+
+    # -------------------------
+    # UI creation (unchanged besides ranges)
+    # -------------------------
+    def create_program_tab(self):
+        self.frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.frame, text="Program Input")
+        self.canvas = tk.Canvas(self.frame, bg="#D3D3D3", highlightthickness=0)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.v_scrollbar = ttk.Scrollbar(self.frame, orient="vertical", command=self.canvas.yview)
+        self.v_scrollbar.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=self.v_scrollbar.set)
+        self.inner_frame = tk.Frame(self.canvas, bg="#D3D3D3")
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
+        self.inner_frame.columnconfigure(1, weight=1)
+        self.inner_frame.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.add_entry(event=None)
+
+    def _on_frame_configure(self, event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=self.canvas.winfo_width())
+
+    def _on_frame1_configure(self, event):
+        self.canvas1.configure(scrollregion=self.canvas1.bbox("all"))
+
+    def create_register_tab(self):
+        self.frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.frame, text="Register Tab")
+        self.canvas1 = tk.Canvas(self.frame, bg="#D3D3D3", highlightthickness=0)
+        self.canvas1.pack(side="left", fill="both", expand=True)
+        self.v_scrollbar = ttk.Scrollbar(self.frame, orient="vertical", command=self.canvas1.yview)
+        self.v_scrollbar.pack(side="right", fill="y")
+        self.canvas1.configure(yscrollcommand=self.v_scrollbar.set)
+        self.innerFrame = tk.Frame(self.canvas1, bg="#D3D3D3")
+        self.canvas_window = self.canvas1.create_window((0, 0), window=self.innerFrame, anchor="nw")
+        self.innerFrame.columnconfigure(1, weight=1)
+        
+        ttk.Label(self.innerFrame, text="Reg", font=('Arial', 10, 'bold'), anchor="center").grid(row=0, column=0, padx=5, pady=5, sticky='ew')
+        ttk.Label(self.innerFrame, text="Value (Hex)", font=('Arial', 10, 'bold'), anchor="center").grid(row=0, column=1, pady=5, sticky='ew')
+        
+        self.reg_entries = {}
+        for i in range(32):
+            reg_name = f"x{i}"
+            ttk.Label(self.innerFrame, text=reg_name).grid(row=i + 1, column=0, padx=5, sticky='w')
+            entry = tk.Entry(self.innerFrame, width=15)
+            entry.grid(row=i + 1, column=1, padx=5, pady=1)
+            if i == 0:
+                entry.insert(0, "0x00000000")
+                entry.config(state='readonly', bg='#D3D3D3')
+            else:
+                entry.insert(0, f"0x{REGISTER_FILE[i]:08x}")
+                self.reg_entries[i] = entry
+                entry.bind('<FocusOut>', lambda e, reg=i: self.update_register_value(reg))
+        
+        # PC display
+        ttk.Label(self.innerFrame, text="PC").grid(row=33, column=0, padx=5, sticky='w')
+        self.pc_entry = tk.Entry(self.innerFrame, width=15)
+        self.pc_entry.grid(row=33, column=1, padx=5, pady=1)
+        self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
+        self.pc_entry.config(state='readonly')
+        
+        self.innerFrame.bind("<Configure>", lambda e: self.canvas1.configure(scrollregion=self.canvas1.bbox("all")))
+        
+
+    def update_register_value(self, reg):
+        try:
+            entry = self.reg_entries[reg]
+            value_str = entry.get().strip()
+            if value_str.startswith('0x'):
+                value = int(value_str, 16)
+            else:
+                value = int(value_str)
+            if value < -2147483648 or value > 4294967295:
+                raise ValueError("Value out of 32-bit range")
+            if value < 0:
+                value = (1 << 32) + value
+            REGISTER_FILE[reg] = value & 0xFFFFFFFF
+            entry.delete(0, tk.END)
+            entry.insert(0, f"0x{value:08x}")
+        except Exception:
+            entry.delete(0, tk.END)
+            entry.insert(0, f"0x{REGISTER_FILE[reg]:08x}")
+            messagebox.showerror("Error", f"Invalid value for register x{reg}")
+
+    def create_memory_tab(self):
+        self.memory_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.memory_frame, text="Memory Input")
+        self.create_memory_table(self.memory_frame)
+        
+        goto_frame = tk.Frame(self.memory_frame, bg="#D3D3D3")
+        goto_frame.pack(fill='x', padx=10, pady=5)
+        tk.Label(goto_frame, text="GOTO Address (hex):", bg="#D3D3D3").pack(side='left')
+        self.goto_entry = tk.Entry(goto_frame, width=10)
+        self.goto_entry.pack(side='left', padx=5)
+        self.goto_entry.insert(0, "0x0000")
+        goto_button = tk.Button(goto_frame, text="GOTO", command=self.goto_memory)
+        goto_button.pack(side='left', padx=5)
+
+    def create_memory_table(self, parent):
+        table_frame = tk.Frame(parent, bg="#D3D3D3", bd=3)
+        table_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        canvas = tk.Canvas(table_frame, bg="#D3D3D3")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="#D3D3D3")
+        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        headers = ["Address", "Value"]
+        for col, header in enumerate(headers):
+            label = tk.Label(scrollable_frame, text=header, font=('Arial', 10, 'bold'), bg="#D3D3D3", width=20)
+            label.grid(row=0, column=col, padx=5, pady=2)
+
+        # Word-aligned addresses
+        row_idx = 1
+        for addr in range(self.memory_low, self.memory_high + 1, 4):
+            addr_label = tk.Label(scrollable_frame, text=f"0x{addr:04x}", bg="#D3D3D3", width=20)
+            addr_label.grid(row=row_idx, column=0, padx=5, pady=1)
+            entry = tk.Entry(scrollable_frame, width=20)
+            entry.grid(row=row_idx, column=1, padx=5, pady=1)
+            entry.insert(0, f"0x{self.read_word(addr):08x}")
+            self.memory_entries[addr] = entry
+            entry.bind('<FocusOut>', lambda e, addr=addr: self.update_memory_value(addr))
+            row_idx += 1
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.mem_canvas = canvas
+        self.mem_scrollable_frame = scrollable_frame
+
+    def read_word(self, addr):
+        """Read 4 bytes as a word (little-endian)"""
+        if addr % 4 != 0:
+            return 0  # Only word-aligned reads
+        b0 = self.memory.get(addr, 0)
+        b1 = self.memory.get(addr + 1, 0)
+        b2 = self.memory.get(addr + 2, 0)
+        b3 = self.memory.get(addr + 3, 0)
+        return (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+
+    def write_word(self, addr, value):
+        """Write 4 bytes as a word (little-endian)"""
+        # Only allow writes to data segment and ensure word alignment
+        if addr < DATA_START or addr > DATA_END - 3 or addr % 4 != 0:
+            return False
+            
+        self.memory[addr] = value & 0xFF
+        self.memory[addr + 1] = (value >> 8) & 0xFF
+        self.memory[addr + 2] = (value >> 16) & 0xFF
+        self.memory[addr + 3] = (value >> 24) & 0xFF
+        return True
+
+
+    def goto_memory(self):
+        try:
+            addr_str = self.goto_entry.get().strip()
+            addr = int(addr_str, 16)
+            if addr < self.memory_low or addr > self.memory_high:
+                messagebox.showerror("Error", f"Address must be in range 0x{self.memory_low:04x}-0x{self.memory_high:04x}")
+                return
+            if addr % 4 != 0:
+                messagebox.showwarning("Warning", "Address not word-aligned; navigating to nearest word.")
+                addr = addr - (addr % 4)
+            if addr in self.memory_entries:
+                widget = self.memory_entries[addr]
+                widget.focus_set()
+                try:
+                    self.mem_canvas.yview_moveto(widget.winfo_y() / max(1, self.mem_scrollable_frame.winfo_height()))
+                except Exception:
+                    pass
+        except ValueError:
+            messagebox.showerror("Error", "Invalid address format")
+    
+    def update_memory_value(self, address):
+        try:
+            entry = self.memory_entries[address]
+            value_str = entry.get().strip()
+            if value_str.startswith('0x'):
+                value = int(value_str, 16)
+            else:
+                value = int(value_str)
+            if value < 0 or value > 0xFFFFFFFF:
+                raise ValueError("Value out of range")
+            if not self.write_word(address, value):
+                raise ValueError("Invalid memory address for write")
+            entry.delete(0, tk.END)
+            entry.insert(0, f"0x{value:08x}")
+        except Exception:
+            entry.delete(0, tk.END)
+            entry.insert(0, f"0x{self.read_word(address):08x}")
+            messagebox.showerror("Error", "Invalid memory value or address")
+
+    def update_memory_display(self):
+        for addr, entry in self.memory_entries.items():
+            entry.config(state='normal')
+            entry.delete(0, tk.END)
+            entry.insert(0, f"0x{self.read_word(addr):08x}")
+            entry.config(state='readonly')
+
+    def reset_simulation(self):
+        self.pipeline_state = {
+            'PC': 0x0080,
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},  # Added PC
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
+            'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
+            'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
+        }
+        self.cycle_count = 0
+        self.is_running = False
+        for i in range(1, 32):
+            self.reg_entries[i].config(state='normal')
+            self.reg_entries[i].delete(0, tk.END)
+            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
+            self.reg_entries[i].config(state='readonly')
+        self.update_memory_display()
+        self.status_var.set("Simulation reset")
+        messagebox.showinfo("Reset", "Simulation has been reset")
+
+    # -------------------------
+    # Pipeline: core functions
+    # -------------------------
+    
+    def step_execution(self):
+        """Perform ONE pipeline cycle with proper hazard handling"""
+        if not self.program_memory:
+            if not self.load_program_to_memory():
+                messagebox.showwarning("No Program", "No valid program to execute")
+                return
+
+        self.cycle_count += 1
+
+        # Pipeline stages in reverse order (WB -> MEM -> EX -> ID -> IF)
+        self.write_back()
+        self.memory_access()
+        
+        # Execute and check for branches
+        ex_mem_new = self.execute_current_instruction()
+        branch_taken = ex_mem_new.get('cond', 0) == 1
+        
+        # Advance pipeline with hazard handling
+        self.pipeline_advance(ex_mem_new, branch_taken)
+
+        # Update displays
+        self.update_register_display()
+        self.update_memory_display()
+        self.update_pipeline_display()
+        self.update_pc_display()
+
+        self.status_var.set(f"Cycle: {self.cycle_count} - PC: 0x{self.pipeline_state['PC']:08x}")
+
+        # Check for completion
+        if self.is_program_complete():
+            self.finalize_execution()
+
+    def is_program_complete(self):
+        """Check if program execution is complete"""
+        pc = self.pipeline_state['PC']
+        pipeline_empty = (
+            self.pipeline_state['IF_ID']['IR'] == 0 and
+            self.pipeline_state['ID_EX']['IR'] == 0 and
+            self.pipeline_state['EX_MEM']['IR'] == 0 and
+            self.pipeline_state['MEM_WB']['IR'] == 0
+        )
+        return pipeline_empty and (pc not in self.program_memory)
+
+    def finalize_execution(self):
+        """Final steps after program completion"""
+        instructions = []
+        for i, entry in enumerate(self.entry_widgets):
+            line_text = entry.get().strip()
+            if line_text:
+                instructions.append((i + 1, line_text))
+
+        if instructions:
+            opcodes = self.generate_opcodes(instructions)
+            self.display_opcodes(opcodes)
+            self.notebook.select(3)  # Switch to opcode tab
+
+        self.status_var.set("Execution completed - Opcodes generated")
+        self.is_running = False
+        self.runButton["state"] = "disabled"
+        self.stepButton["state"] = "disabled"
+
+    def memory_access(self):
+        """MEM stage: Handle memory operations"""
+        ex = self.pipeline_state['EX_MEM']
+        instruction = ex.get('IR', 0)
+
+        if not instruction:
+            self.pipeline_state['MEM_WB'] = {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
+            return
+
+        inst_bin = format(instruction, '032b')
+        opcode = inst_bin[25:32]
+        funct3 = inst_bin[17:20]
+        addr = ex.get('ALUOUTPUT', 0)
+
+        # LW instruction
+        if opcode == "0000011" and funct3 == "010":
+            if DATA_START <= addr <= DATA_END - 3 and addr % 4 == 0:
+                lmd = self.read_word(addr)
+            else:
+                lmd = 0
+            self.pipeline_state['MEM_WB'] = {
+                'LMD': lmd,
+                'IR': instruction,
+                'ALUOUTPUT': addr
+            }
+            return
+
+        # SW instruction  
+        if opcode == "0100011" and funct3 == "010":
+            data = ex.get('B', 0)
+            if DATA_START <= addr <= DATA_END - 3 and addr % 4 == 0:
+                self.write_word(addr, data)
+            self.pipeline_state['MEM_WB'] = {
+                'LMD': 0,
+                'IR': instruction,
+                'ALUOUTPUT': addr
+            }
+            return
+
+        # Other instructions (ALU operations)
+        self.pipeline_state['MEM_WB'] = {
+            'LMD': 0,
+            'IR': instruction,
+            'ALUOUTPUT': ex.get('ALUOUTPUT', 0)
+        }
+
+    def write_back(self):
+        """WB stage: Write results to register file"""
+        mem = self.pipeline_state['MEM_WB']
+        instruction = mem.get('IR', 0)
+        
+        if not instruction:
+            return
+
+        inst_bin = format(instruction, '032b')
+        opcode = inst_bin[25:32]
+        funct3 = inst_bin[17:20]
+        rd = int(inst_bin[20:25], 2)
+
+        # Only write to non-zero registers
+        if rd != 0:
+            if opcode == "0110011":  # R-type
+                REGISTER_FILE[rd] = mem.get('ALUOUTPUT', 0) & 0xFFFFFFFF
+            elif opcode == "0010011":  # I-type (ORI)
+                REGISTER_FILE[rd] = mem.get('ALUOUTPUT', 0) & 0xFFFFFFFF
+            elif opcode == "0000011" and funct3 == "010":  # LW
+                REGISTER_FILE[rd] = mem.get('LMD', 0) & 0xFFFFFFFF
+
+        # Ensure x0 is always zero
+        REGISTER_FILE[0] = 0
+
+    def pipeline_advance(self, ex_mem_new=None, branch_taken=False):
+        """Advance pipeline with proper hazard handling"""
+        if ex_mem_new is None:
+            ex_mem_new = {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0}
+
+        # MEM_WB gets current EX_MEM
+        old_ex = self.pipeline_state['EX_MEM']
+        self.pipeline_state['MEM_WB'] = {
+            'LMD': self.pipeline_state['MEM_WB'].get('LMD', 0),
+            'IR': old_ex.get('IR', 0),
+            'ALUOUTPUT': old_ex.get('ALUOUTPUT', 0)
+        }
+
+        # EX_MEM gets new values from execute stage
+        self.pipeline_state['EX_MEM'] = ex_mem_new
+
+        # Handle control hazards (Group 5,6: Pipeline freeze)
+        if branch_taken:
+            # Freeze pipeline: bubble in ID_EX, keep IF_ID
+            self.pipeline_state['ID_EX'] = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
+            # Don't fetch new instruction yet
+            return
+
+        # Normal flow: ID_EX gets IF_ID
+        old_if_id = self.pipeline_state['IF_ID']
+        self.pipeline_state['ID_EX'] = old_if_id.copy()
+        
+        # Set register values for the instruction in ID_EX
+        if old_if_id.get('IR', 0):
+            self.set_register_values_for_instruction()
+
+        # Fetch next instruction
+        self.instruction_fetch()
+
+    def set_register_values_for_instruction(self):
+        """Set register values A, B and immediate for instruction in ID_EX"""
+        instruction = self.pipeline_state['ID_EX']['IR']
+        inst_bin = format(instruction, '032b')
+        
+        rs1 = int(inst_bin[12:17], 2)
+        rs2 = int(inst_bin[7:12], 2)
+        
+        self.pipeline_state['ID_EX']['A'] = REGISTER_FILE[rs1]
+        self.pipeline_state['ID_EX']['B'] = REGISTER_FILE[rs2]
+        
+        # Set immediate value based on instruction type
+        opcode = inst_bin[25:32]
+        if opcode in ["0010011", "0000011"]:  # I-type
+            imm = int(inst_bin[0:12], 2)
+            if inst_bin[0] == '1':
+                imm -= (1 << 12)
+            self.pipeline_state['ID_EX']['IMM'] = imm
+        elif opcode == "0100011":  # S-type
+            imm = int(inst_bin[0:7] + inst_bin[20:25], 2)
+            if inst_bin[0] == '1':
+                imm -= (1 << 12)
+            self.pipeline_state['ID_EX']['IMM'] = imm
+        elif opcode == "1100011":  # B-type
+            imm = int(inst_bin[0] + inst_bin[24] + inst_bin[1:7] + inst_bin[20:24], 2)
+            if inst_bin[0] == '1':
+                imm -= (1 << 13)
+            self.pipeline_state['ID_EX']['IMM'] = imm
+        else:
+            self.pipeline_state['ID_EX']['IMM'] = 0
+
+    def instruction_fetch(self):
+        """IF stage: Fetch instruction from program memory"""
+        pc = self.pipeline_state['PC']
+        
+        if pc in self.program_memory:
+            self.pipeline_state['IF_ID'] = {
+                'IR': self.program_memory[pc],
+                'NPC': (pc + 4) & 0xFFFFFFFF,
+                'PC': pc
+            }
+            self.pipeline_state['PC'] = (pc + 4) & 0xFFFFFFFF
+        else:
+            # No more instructions to fetch
+            self.pipeline_state['IF_ID'] = {'IR': 0, 'NPC': 0, 'PC': 0}
+
+    def execute_current_instruction(self):
+        """EX stage: Execute instruction and compute results"""
+        idex = self.pipeline_state['ID_EX']
+        instruction = idex.get('IR', 0)
+        
+        # Default NOP
+        ex_mem_new = {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0}
+
+        if not instruction:
+            return ex_mem_new
+
+        inst_bin = format(instruction, '032b')
+        opcode = inst_bin[25:32]
+        funct3 = inst_bin[17:20]
+
+        rs1_val = idex.get('A', 0)
+        rs2_val = idex.get('B', 0)
+        imm_val = idex.get('IMM', 0)
+
+        ex_mem_new['IR'] = instruction
+        ex_mem_new['B'] = rs2_val
+
+        # R-type instructions
+        if opcode == "0110011":
+            if funct3 == "111":  # AND
+                result = rs1_val & rs2_val
+            elif funct3 == "110":  # OR
+                result = rs1_val | rs2_val
+            else:
+                result = 0
+            ex_mem_new['ALUOUTPUT'] = result & 0xFFFFFFFF
+
+        # I-type instructions
+        elif opcode == "0010011":
+            if funct3 == "110":  # ORI
+                result = rs1_val | (imm_val & 0xFFF)
+                ex_mem_new['ALUOUTPUT'] = result & 0xFFFFFFFF
+
+        # Load/Store instructions
+        elif opcode == "0000011" and funct3 == "010":  # LW
+            address = (rs1_val + imm_val) & 0xFFFFFFFF
+            ex_mem_new['ALUOUTPUT'] = address
+
+        elif opcode == "0100011" and funct3 == "010":  # SW
+            address = (rs1_val + imm_val) & 0xFFFFFFFF
+            ex_mem_new['ALUOUTPUT'] = address
+            ex_mem_new['B'] = rs2_val
+
+        # Branch instructions
+        elif opcode == "1100011":
+            branch_taken = False
+            if funct3 == "100":  # BLT
+                branch_taken = (rs1_val < rs2_val)
+            elif funct3 == "101":  # BGE
+                branch_taken = (rs1_val >= rs2_val)
+                
+            ex_mem_new['cond'] = 1 if branch_taken else 0
+            
+            if branch_taken:
+                # Calculate branch target
+                npc = idex.get('NPC', 0)
+                branch_target = (npc + imm_val - 4) & 0xFFFFFFFF
+                self.pipeline_state['PC'] = branch_target
+
+        return ex_mem_new
+    
+    def update_pc_display(self):
+        """Update PC display in register tab"""
+        self.pc_entry.config(state='normal')
+        self.pc_entry.delete(0, tk.END)
+        self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
+        self.pc_entry.config(state='readonly')
+    
+    def update_register_display(self):
+        """Update all register displays"""
+        for i in range(1, 32):
+            self.reg_entries[i].config(state='normal')
+            self.reg_entries[i].delete(0, tk.END)
+            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
+            self.reg_entries[i].config(state='readonly')
+    
+    def update_pipeline_display(self):
+        """Update pipeline state display"""
+        self.pipeline_text.config(state=tk.NORMAL)
+        self.pipeline_text.delete(1.0, tk.END)
+        
+        header = "μRISCV PIPELINE STATE\n" + "=" * 70 + "\n"
+        header += f"Cycle: {self.cycle_count} | PC: 0x{self.pipeline_state['PC']:08x}\n"
+        header += "=" * 70 + "\n"
+        self.pipeline_text.insert(tk.END, header)
+        
+        stages = [
+            ("IF/ID", self.pipeline_state['IF_ID']),
+            ("ID/EX", self.pipeline_state['ID_EX']),
+            ("EX/MEM", self.pipeline_state['EX_MEM']),
+            ("MEM/WB", self.pipeline_state['MEM_WB'])
+        ]
+        
+        for stage_name, stage_data in stages:
+            self.pipeline_text.insert(tk.END, f"\n{stage_name}:\n")
+            for reg, value in stage_data.items():
+                if isinstance(value, int):
+                    display_value = f"0x{value:08x}"
+                else:
+                    display_value = str(value)
+                self.pipeline_text.insert(tk.END, f"  {reg}: {display_value}\n")
+        
+        self.pipeline_text.config(state=tk.DISABLED)
+
+    # -------------------------
+    # Non-pipeline (assembler) helpers
+    # -------------------------
+    # Modify the load_program_to_memory method to fix the loading issue
+    def load_program_to_memory(self):
+        """
+        Properly loads validated instructions into program_memory.
+        """
+        PROG_START = 0x0080  # Fixed: use the constant
+        address = PROG_START
+
+        # Clear program memory
+        self.program_memory.clear()
+
+        # Collect non-empty instructions
+        lines = []
+        for i, entry in enumerate(self.entry_widgets):
+            text = entry.get().strip()
+            if text:
+                lines.append((i + 1, text))
+
+        if not lines:
+            print("No lines to load")
+            return False
+
+        print(f"Loading {len(lines)} lines into program memory...")
+
+        # First pass: collect labels
+        labels = {}
+        pc = PROG_START
+
+        for line_num, text in lines:
+            clean = text.split("#")[0].strip()
+
+            if ":" in clean:
+                label = clean.split(":")[0].strip()
+                labels[label] = pc
+                print(f"Found label '{label}' at address 0x{pc:04x}")
+
+                inst_after = clean.split(":")[1].strip()
+                if inst_after:
+                    pc += 4
+            else:
+                pc += 4
+
+        # Second pass: encode instructions
+        pc = PROG_START
+        for line_num, text in lines:
+            clean = text.split("#")[0].strip()
+
+            # Handle labels
+            if ":" in clean:
+                before, after = clean.split(":", 1)
+                label = before.strip()
+                inst = after.strip()
+
+                if inst == "" or inst.isspace():
+                    continue
+                clean = inst
+
+            # Parse instruction
+            try:
+                if clean.upper().startswith("SW") or clean.upper().startswith("LW"):
+                    parts = clean.split()
+                    mnemonic = parts[0].upper()
+                    # For LW/SW, the format is different
+                    if mnemonic == "LW":
+                        # LW rd, offset(rs1)
+                        rd = parts[1].rstrip(',')
+                        offset_rs1 = parts[2]
+                        operands = [rd, offset_rs1]
+                    else:  # SW
+                        # SW rs2, offset(rs1)
+                        rs2 = parts[1].rstrip(',')
+                        offset_rs1 = parts[2]
+                        operands = [rs2, offset_rs1]
+                else:
+                    parts = re.split(r'[,\s]+', clean)
+                    parts = [p for p in parts if p]
+                    mnemonic = parts[0].upper()
+                    operands = parts[1:]
+
+                print(f"Encoding: {mnemonic} {operands} at 0x{pc:04x}")
+
+                # Encode instruction
+                hex_opcode = "00000000"  # Default NOP
+                
+                if mnemonic in R_TYPE:
+                    hex_opcode = self.encode_r_type(mnemonic, operands)
+                elif mnemonic in I_TYPE:
+                    hex_opcode = self.encode_i_type(mnemonic, operands)
+                elif mnemonic in S_TYPE:
+                    hex_opcode = self.encode_s_type(mnemonic, operands)
+                elif mnemonic in B_TYPE:
+                    # Label resolution for branches
+                    if len(operands) >= 3 and operands[2] in labels:
+                        offset = labels[operands[2]] - pc
+                        print(f"Branch label resolution: {operands[2]} = 0x{labels[operands[2]]:04x}, offset = {offset}")
+                        modified_operands = operands[0:2] + [str(offset)]
+                        hex_opcode = self.encode_b_type(mnemonic, modified_operands)
+                    else:
+                        hex_opcode = self.encode_b_type(mnemonic, operands)
+                elif mnemonic == ".WORD":
+                    hex_opcode = self.encode_directive(mnemonic, operands[0])
+
+                # Store encoded instruction
+                instruction_value = int(hex_opcode, 16)
+                self.program_memory[pc] = instruction_value
+                print(f"Stored at 0x{pc:04x}: 0x{instruction_value:08x} ({hex_opcode})")
+
+                pc += 4
+
+            except Exception as e:
+                print(f"Error encoding line {line_num}: {e}")
+                messagebox.showerror("Encoding Error", f"Line {line_num}: {e}")
+                return False
+
+        print(f"Successfully loaded {len(self.program_memory)} instructions")
+        self.debug_program_memory()
+        return True
+
+    def create_pipeline_tab(self):
+        self.pipeline_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.pipeline_frame, text="Pipeline State")
+        self.pipeline_text = scrolledtext.ScrolledText(self.pipeline_frame, bg="white", width=100, height=25, font=("Courier New", 10))
+        self.pipeline_text.pack(fill='both', expand=True, padx=10, pady=10)
+        self.pipeline_text.config(state=tk.DISABLED)
+
+    def update_register_display(self):
+        for i in range(1, 32):
+            self.reg_entries[i].config(state='normal')
+            self.reg_entries[i].delete(0, tk.END)
+            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
+            self.reg_entries[i].config(state='readonly')
+        # ---- UPDATE PC display ----
+        self.pc_entry.config(state='normal')
+        self.pc_entry.delete(0, tk.END)
+        self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
+        self.pc_entry.config(state='readonly')
+
+
+    def update_pipeline_display(self):
+        self.pipeline_text.config(state=tk.NORMAL)
+        self.pipeline_text.delete(1.0, tk.END)
+        header = "μRISCV PIPELINE STATE\n" + "=" * 70 + "\n"
+        header += f"Cycle: {self.cycle_count} | PC: 0x{self.pipeline_state['PC']:08x}\n"
+        header += "=" * 70 + "\n"
+        self.pipeline_text.insert(tk.END, header)
+        stages = [
+            ("IF/ID", self.pipeline_state['IF_ID']),
+            ("ID/EX", self.pipeline_state['ID_EX']),
+            ("EX/MEM", self.pipeline_state['EX_MEM']),
+            ("MEM/WB", self.pipeline_state['MEM_WB'])
+        ]
+        for stage_name, stage_data in stages:
+            self.pipeline_text.insert(tk.END, f"\n{stage_name}:\n")
+            for reg, value in stage_data.items():
+                if isinstance(value, int):
+                    display_value = f"0x{value:08x}"
+                else:
+                    display_value = str(value)
+                self.pipeline_text.insert(tk.END, f"  {reg}: {display_value}\n")
+        self.pipeline_text.config(state=tk.DISABLED)
+
+    def create_opcode_tab(self):
+        self.opcode_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.opcode_frame, text="Opcode Output")
+        self.opcode_text = scrolledtext.ScrolledText(self.opcode_frame, bg="white", width=100, height=25, font=("Courier New", 10))
+        self.opcode_text.pack(fill='both', expand=True, padx=10, pady=10)
+        self.opcode_text.config(state=tk.DISABLED)
+
+    def create_buttons(self):
+        frame = tk.Frame(self.root, bg="#D3D3D3", bd=1, relief="sunken")
+        frame.pack(fill='x', side='top', padx=10, pady=(10,0))
+        self.runButton = Button(frame, text="Run", width=6, command=self.run_program)
+        self.runButton.pack(side="right", padx=2)
+        self.runButton["state"] = "disabled"
+        self.stepButton = Button(frame, text="Step", width=6, command=self.step_execution)
+        self.stepButton.pack(side="right", padx=2)
+        self.stepButton["state"] = "disabled"
+        self.resetButton = Button(frame, text="Reset", width=6, command=self.reset_simulation)
+        self.resetButton.pack(side="right", padx=2)
+        self.checkButton = Button(frame, text="Check", width=6, command=self.check_program)
+        self.checkButton.pack(side="right", padx=2)
+
+    def run_program(self):
+        """Run program to completion"""
+        print("=== RUN PROGRAM STARTED ===")
+        
+        # Always reload the program to ensure it's current
+        if not self.load_program_to_memory():
+            messagebox.showwarning("No Program", "No valid program to execute")
+            return
+
+        # Reset pipeline state
+        self.pipeline_state = {
+            'PC': PROG_START,
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
+            'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
+            'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
+        }
+        self.cycle_count = 0
+
+        print(f"Starting execution at PC: 0x{self.pipeline_state['PC']:04x}")
+
+        # Prime the pipeline with first instruction
+        self.instruction_fetch()
+
+        # Run until completion
+        max_cycles = 100  # Safety limit to prevent infinite loops
+        while not self.is_program_complete() and self.cycle_count < max_cycles:
+            self.step_execution()
+            self.root.update()
+
+        if self.cycle_count >= max_cycles:
+            messagebox.showwarning("Execution Stopped", "Reached maximum cycle limit")
+        
+        self.finalize_execution()
+        print("=== RUN PROGRAM COMPLETED ===")
+
+    def reset_simulation(self):
+        """Reset simulation to initial state"""
+        self.pipeline_state = {
+            'PC': PROG_START,
+            'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
+            'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
+            'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
+        }
+        self.cycle_count = 0
+        self.is_running = False
+        
+        # Reset registers
+        for i in range(1, 32):
+            REGISTER_FILE[i] = 0
+        self.update_register_display()
+        self.update_memory_display()
+        self.update_pipeline_display()
+        self.update_pc_display()
+        
+        self.status_var.set("Simulation reset")
+        self.runButton["state"] = "active"
+        self.stepButton["state"] = "active"
+    # -------------------------
+    # Assembler/encoding & validation 
+    # -------------------------
+    def reg_to_bin(self, reg):
+        if not REGISTER_PATTERN.match(reg):
+            raise ValueError(f"Invalid register: {reg}")
+        return format(int(reg[1:]), '05b')
+
+    def imm_to_bin(self, imm, bits=12):
+        try:
+            if isinstance(imm, str) and imm.startswith('0x'):
+                imm_val = int(imm, 16)
+            else:
+                imm_val = int(imm)
+            if imm_val < 0:
+                imm_val = (1 << bits) + imm_val
+            return format(imm_val, f'0{bits}b')
+        except ValueError:
+            raise ValueError(f"Invalid immediate value: {imm}")
+
+    def binary_to_hex(self, binary_str):
+        padding = (4 - len(binary_str) % 4) % 4
+        binary_str = '0' * padding + binary_str
+        hex_str = ''
+        for i in range(0, len(binary_str), 4):
+            nibble = binary_str[i:i+4]
+            hex_str += format(int(nibble, 2), 'x')
+        return hex_str.zfill(8)
+
+    def encode_r_type(self, instruction, operands):
+        opcode = list(R_TYPE[instruction].keys())[0]
+        funct3 = R_TYPE[instruction][opcode]
+        rd = self.reg_to_bin(operands[0])
+        rs1 = self.reg_to_bin(operands[1])
+        rs2 = self.reg_to_bin(operands[2])
+        funct7 = "0000000"
+        binary = funct7 + rs2 + rs1 + funct3 + rd + opcode
+        return self.binary_to_hex(binary)
+
+    def debug_program_memory(self):
+        """Debug method to check what's in program_memory"""
+        print("=== DEBUG program_memory ===")
+        if not self.program_memory:
+            print("program_memory is EMPTY")
+            return
+        
+        for addr in sorted(self.program_memory.keys()):
+            instruction = self.program_memory[addr]
+            print(f"0x{addr:04x}: 0x{instruction:08x}")
+        print("=== END DEBUG ===")
+
+    def encode_i_type(self, instruction, operands):
+        opcode = list(I_TYPE[instruction].keys())[0]
+        funct3 = I_TYPE[instruction][opcode]
+        if instruction == "LW":
+            rd = self.reg_to_bin(operands[0])
+            match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', operands[1])
+            if not match:
+                raise ValueError(f"Invalid LW operand format: {operands[1]}")
+            imm = match.group(1)
+            rs1 = self.reg_to_bin(match.group(2))
+            imm_bin = self.imm_to_bin(imm, 12)
+        else:
+            rd = self.reg_to_bin(operands[0])
+            rs1 = self.reg_to_bin(operands[1])
+            imm_bin = self.imm_to_bin(operands[2], 12)
+        binary = imm_bin + rs1 + funct3 + rd + opcode
+        return self.binary_to_hex(binary)
+
+    def encode_s_type(self, instruction, operands):
+        opcode = list(S_TYPE[instruction].keys())[0]
+        funct3 = S_TYPE[instruction][opcode]
+        rs2 = self.reg_to_bin(operands[0])
+        match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', operands[1])
+        if not match:
+            raise ValueError(f"Invalid SW operand format: {operands[1]}")
+        imm = match.group(1)
+        rs1 = self.reg_to_bin(match.group(2))
+        imm_bin = self.imm_to_bin(imm, 12)
+        imm_11_5 = imm_bin[0:7]
+        imm_4_0 = imm_bin[7:12]
+        binary = imm_11_5 + rs2 + rs1 + funct3 + imm_4_0 + opcode
+        return self.binary_to_hex(binary)
+
+    def encode_b_type(self, instruction, operands):
+        opcode = list(B_TYPE[instruction].keys())[0]
+        funct3 = B_TYPE[instruction][opcode]
+        rs1 = self.reg_to_bin(operands[0])
+        rs2 = self.reg_to_bin(operands[1])
+        imm_str = operands[2]
+        try:
+            if imm_str.startswith('0x'):
+                imm = int(imm_str, 16)
+            else:
+                imm = int(imm_str)
+        except ValueError:
+            imm = 0
+        imm_bin = self.imm_to_bin(imm, 13)
+        imm_12 = imm_bin[0]
+        imm_11 = imm_bin[1]
+        imm_10_5 = imm_bin[2:8]
+        imm_4_1 = imm_bin[8:12]
+        binary = imm_12 + imm_10_5 + rs2 + rs1 + funct3 + imm_4_1 + imm_11 + opcode
+        return self.binary_to_hex(binary)
+
+    def encode_directive(self, directive, operand):
+        try:
+            if operand.startswith('0x'):
+                value = int(operand, 16)
+            else:
+                value = int(operand)
+            if value < -2147483648 or value > 4294967295:
+                raise ValueError(f"Value out of 32-bit range: {operand}")
+            if value < 0:
+                value = (1 << 32) + value
+            return format(value, '08x')
+        except ValueError:
+            raise ValueError(f"Invalid value for .WORD directive: {operand}")
+
+    def generate_opcodes(self, instructions):
+        """Generate opcodes for display - FIXED version"""
+        opcodes = []
+        program_counter = 0x0080
+        labels = {}
+        current_pc = program_counter
+        
+        print("=== GENERATING OPCODES ===")
+        
+        # First pass: collect labels
+        for line_num, instruction in instructions:
+            clean_instruction = instruction.split('#')[0].strip()
+            if not clean_instruction:
+                continue
+                
+            if ':' in clean_instruction:
+                label_part = clean_instruction.split(':')[0].strip()
+                instruction_part = clean_instruction.split(':')[1].strip() if len(clean_instruction.split(':')) > 1 else ""
+                labels[label_part] = current_pc
+                print(f"Label '{label_part}' at 0x{current_pc:04x}")
+                if instruction_part:
+                    current_pc += 4
+            else:
+                current_pc += 4
+
+        # Second pass: generate opcodes
+        current_pc = program_counter
+        for line_num, instruction in instructions:
+            clean_instruction = instruction.split('#')[0].strip()
+            if not clean_instruction:
+                continue
+                
+            if ':' in clean_instruction:
+                label_part = clean_instruction.split(':')[0].strip()
+                instruction_part = clean_instruction.split(':')[1].strip() if len(clean_instruction.split(':')) > 1 else ""
+                
+                # Add label to output
+                opcodes.append(f"0x{current_pc:04x}: [LABEL] {label_part}:")
+                print(f"Added label: {label_part} at 0x{current_pc:04x}")
+                
+                if instruction_part:
+                    try:
+                        hex_opcode = self.encode_single_instruction(instruction_part, labels, current_pc)
+                        opcodes.append(f"0x{current_pc:04x}: {hex_opcode} // {instruction_part}")
+                        print(f"Added instruction: {hex_opcode} at 0x{current_pc:04x}")
+                        current_pc += 4
+                    except Exception as e:
+                        opcodes.append(f"0x{current_pc:04x}: ERROR - {str(e)} // {instruction_part}")
+                        current_pc += 4
+            else:
+                try:
+                    hex_opcode = self.encode_single_instruction(clean_instruction, labels, current_pc)
+                    opcodes.append(f"0x{current_pc:04x}: {hex_opcode} // {clean_instruction}")
+                    print(f"Added instruction: {hex_opcode} at 0x{current_pc:04x}")
+                    current_pc += 4
+                except Exception as e:
+                    opcodes.append(f"0x{current_pc:04x}: ERROR - {str(e)} // {clean_instruction}")
+                    current_pc += 4
+        
+        print(f"Generated {len(opcodes)} opcode lines")
+        return opcodes
+
+    def encode_single_instruction(self, instruction, labels, current_pc):
+        """Helper method to encode a single instruction"""
+        # Parse instruction
+        if instruction.upper().startswith("SW") or instruction.upper().startswith("LW"):
+            parts = instruction.split()
+            mnemonic = parts[0].upper()
+            if mnemonic == "LW":
+                rd = parts[1].rstrip(',')
+                offset_rs1 = parts[2]
+                operands = [rd, offset_rs1]
+            else:  # SW
+                rs2 = parts[1].rstrip(',')
+                offset_rs1 = parts[2]
+                operands = [rs2, offset_rs1]
+        else:
+            parts = re.split(r'[,\s]+', instruction)
+            parts = [p for p in parts if p]
+            mnemonic = parts[0].upper()
+            operands = parts[1:]
+
+        # Encode instruction
+        if mnemonic in R_TYPE:
+            return self.encode_r_type(mnemonic, operands)
+        elif mnemonic in I_TYPE:
+            return self.encode_i_type(mnemonic, operands)
+        elif mnemonic in S_TYPE:
+            return self.encode_s_type(mnemonic, operands)
+        elif mnemonic in B_TYPE:
+            # Label resolution for branches
+            if len(operands) >= 3 and operands[2] in labels:
+                offset = labels[operands[2]] - current_pc
+                modified_operands = operands[0:2] + [str(offset)]
+                return self.encode_b_type(mnemonic, modified_operands)
+            else:
+                return self.encode_b_type(mnemonic, operands)
+        elif mnemonic == ".WORD":
+            return self.encode_directive(mnemonic, operands[0])
+        else:
+            return "00000000"
+
+    def display_opcodes(self, opcodes):
+        self.opcode_text.config(state=tk.NORMAL)
+        self.opcode_text.delete(1.0, tk.END)
+        if opcodes:
+            header = "μRISCV OPCODE OUTPUT\n" + "=" * 60 + "\n"
+            header += "Address   Opcode      Instruction\n" + "=" * 60 + "\n"
+            self.opcode_text.insert(tk.END, header)
+            for opcode_line in opcodes:
+                self.opcode_text.insert(tk.END, opcode_line + "\n")
+        else:
+            self.opcode_text.insert(tk.END, "No opcodes generated.")
+        self.opcode_text.config(state=tk.DISABLED)
+
+    # Remaining UI logic for program lines (unchanged)
+    def hit_enter(self, event):
+        current_entry = event.widget
+        try:
+            widget_index = self.entry_widgets.index(current_entry)
+        except ValueError:
+            return "break"
+        last_index = len(self.entry_widgets) - 1
+        if widget_index == last_index:
+            self.add_entry(event)
+            self.canvas.yview_moveto(1.0)
+        elif (widget_index + 1) < len(self.entry_widgets):
+            self.entry_widgets[widget_index + 1].focus_set()
+        return "break"
+
+    def hit_backspace(self, event):
+        current_entry = event.widget
+        if self.runButton['state'] == 'normal':
+            self.runButton["state"] = "disabled"
+        try:
+            widget_index = self.entry_widgets.index(current_entry)
+        except ValueError:
+            return
+        current_text = current_entry.get()
+        if widget_index != 0 and not current_text:
+            self.entry_widgets[widget_index - 1].focus_set()
+            current_entry.destroy()
+            self.line_labels[widget_index].destroy()
+            del self.entry_widgets[widget_index]
+            del self.line_labels[widget_index]
+            for i in range(len(self.entry_widgets)):
+                self.line_labels[i].config(text=str(i + 1))
+            self.inner_frame.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            return "break"
+        if (self.runButton['state'] == 'active'):
+            self.runButton["state"] = "disabled"
+        return
+
+    def add_entry(self, event):
+        self.entry_row_count += 1
+        current_grid_row = self.entry_row_count
+        visible_line_num = len(self.entry_widgets) + 1
+        line_label = tk.Label(self.inner_frame, text=str(visible_line_num), bg="#D3D3D3")
+        line_label.grid(row=current_grid_row, column=0, sticky='w')
+        self.new_entry = tk.Entry(self.inner_frame, bg="white", width=80)
+        self.new_entry.grid(row=current_grid_row, column=1, padx=5, pady=2, sticky='ew')
+        self.entry_widgets.append(self.new_entry)
+        self.line_labels.append(line_label)
+        self.new_entry.focus_set()
+        self.new_entry.bind("<Return>", self.hit_enter)
+        self.new_entry.bind("<BackSpace>", self.hit_backspace)
+        self.new_entry.bind("<Delete>", self.disable_run)
+        self.new_entry.bind("<Key>", self.disable_run)
+        self.inner_frame.update_idletasks()
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
+    def disable_run(self, event):
+        self.runButton["state"] = "disabled"
+
+    def check_program(self):
+        errors = []
+        valid_instructions = 0
+        instructions = []
+        for i, entry in enumerate(self.entry_widgets):
+            line_text = entry.get().strip()
+            if line_text:
+                instructions.append((i + 1, line_text))
+        if not instructions:
+            messagebox.showwarning("No Program", "Please enter some instructions to check.")
+            return
+        for line_num, instruction in instructions:
+            error = self.validate_instruction(line_num, instruction)
+            if error:
+                errors.append(error)
+            else:
+                valid_instructions += 1
+        if errors:
+            result_message = f"VALIDATION FAILED\n\nErrors found: {len(errors)}\nValid instructions: {valid_instructions}\n\nERROR DETAILS:\n" + "\n".join(errors)
+            messagebox.showerror("Program Check Results", result_message)
+            self.status_var.set(f"Check failed: {len(errors)} error(s) found")
+            self.runButton["state"] = "disabled"
+            self.stepButton["state"] = "disabled"
+        else:
+            result_message = f"PROGRAM VALID\n\nValid instructions: {valid_instructions}\nAll instructions are syntactically correct!"
+            messagebox.showinfo("Program Check Results", result_message)
+            self.status_var.set(f"Check passed: {valid_instructions} valid instruction(s)")
+            self.runButton["state"] = "active"
+            self.stepButton["state"] = "active"
+            self.load_program_to_memory()
+
+    def validate_instruction(self, line_num, instruction):
+        instruction = instruction.split('#')[0].strip()
+        if not instruction:
+            return None
+        if ':' in instruction:
+            label_part = instruction.split(':')[0].strip()
+            instruction_part = instruction.split(':')[1].strip() if len(instruction.split(':')) > 1 else ""
+            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', label_part):
+                return f"Line {line_num}: Invalid label name '{label_part}'"
+            if instruction_part:
+                error = self.validate_instruction(line_num, instruction_part)
+                if error:
+                    return error
+            return None
+        if instruction.upper().startswith('SW'):
+            parts = instruction.split()
+            if len(parts) < 3:
+                return f"Line {line_num}: SW requires 2 operands (rs2, offset(rs1))"
+            rs2 = parts[1].rstrip(',')
+            offset_rs1 = ' '.join(parts[2:])
+            if not REGISTER_PATTERN.match(rs2):
+                return f"Line {line_num}: Invalid source register '{rs2}' in SW"
+            match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1)
+            if not match:
+                return f"Line {line_num}: Invalid memory operand format '{offset_rs1}' in SW"
+            if not REGISTER_PATTERN.match(match.group(2)):
+                return f"Line {line_num}: Invalid base register '{match.group(2)}' in SW"
+            return None
+        parts = re.split(r'[,\s]+', instruction)
+        parts = [p for p in parts if p]
+        if not parts:
+            return None
+        mnemonic = parts[0].upper()
+        if mnemonic not in SUPPORTED_INSTRUCTIONS:
+            return f"Line {line_num}: Unsupported instruction '{mnemonic}'"
+        if mnemonic in R_TYPE:
+            if len(parts) != 4:
+                return f"Line {line_num}: {mnemonic} requires 3 operands (rd, rs1, rs2)"
+            for reg in parts[1:4]:
+                if not REGISTER_PATTERN.match(reg):
+                    return f"Line {line_num}: Invalid register '{reg}' in {mnemonic}"
+        elif mnemonic in I_TYPE:
+            if mnemonic == "LW":
+                if len(parts) != 3:
+                    return f"Line {line_num}: LW requires 2 operands (rd, offset(rs1))"
+                if not REGISTER_PATTERN.match(parts[1]):
+                    return f"Line {line_num}: Invalid destination register '{parts[1]}' in LW"
+                offset_rs1_part = parts[2]
+                if IMMEDIATE_PATTERN.match(offset_rs1_part) or HEX_PATTERN.match(offset_rs1_part):
+                    parts[2] = f"{offset_rs1_part}(x0)"
+                    offset_rs1_part = parts[2]
+                match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1_part)
+                if not match:
+                    return f"Line {line_num}: Invalid memory operand format '{offset_rs1_part}' in LW"
+                if not REGISTER_PATTERN.match(match.group(2)):
+                    return f"Line {line_num}: Invalid base register '{match.group(2)}' in LW"
+            else:
+                if len(parts) != 4:
+                    return f"Line {line_num}: ORI requires 3 operands (rd, rs1, immediate)"
+                if not REGISTER_PATTERN.match(parts[1]) or not REGISTER_PATTERN.match(parts[2]):
+                    return f"Line {line_num}: Invalid register in ORI"
+                if not (IMMEDIATE_PATTERN.match(parts[3]) or HEX_PATTERN.match(parts[3])):
+                    return f"Line {line_num}: Invalid immediate '{parts[3]}' in ORI"
+        elif mnemonic in B_TYPE:
+            if len(parts) != 4:
+                return f"Line {line_num}: {mnemonic} requires 3 operands (rs1, rs2, offset/label)"
+            for i in range(1, 3):
+                if not REGISTER_PATTERN.match(parts[i]):
+                    return f"Line {line_num}: Invalid register '{parts[i]}' in {mnemonic}"
+            imm_or_label = parts[3]
+            is_immediate = IMMEDIATE_PATTERN.match(imm_or_label) or HEX_PATTERN.match(imm_or_label)
+            is_label = re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', imm_or_label)
+            if not (is_immediate or is_label):
+                return f"Line {line_num}: Invalid offset or label '{imm_or_label}' in {mnemonic}"
+        elif mnemonic in DIRECTIVE:
+            if len(parts) != 2:
+                return f"Line {line_num}: .WORD requires 1 operand"
+            if not (IMMEDIATE_PATTERN.match(parts[1]) or HEX_PATTERN.match(parts[1])):
+                return f"Line {line_num}: Invalid value '{parts[1]}' for .WORD directive"
+        return None
+
+def main():
+    root = tk.Tk()
+    app = RiscVGUI(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
