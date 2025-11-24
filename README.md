@@ -3,14 +3,6 @@ This is a simulator for a simplified RISC-V processor, μRISCV. The μRISCV proc
 Group 5: LW, SW, AND, OR, ORI, BLT, BGE
 Minimum directive: .word
 # Project Updates
-## Milestone #1
-- [x] Program Input
-- [x] Error Checking
-- [x] Opcode
-- [x] Basic GUI  
-# Video Demo:
-https://drive.google.com/file/d/11MM2coCsVog75gngo4BsEMJZ_NPTL_fR/view?usp=sharing
----
 ## Milestone 2
 - [x] GUI (registers, memory)
 - [x] Initial execution draft (step and full execution added)
