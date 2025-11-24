@@ -6,7 +6,7 @@ import math
 import random
 
 # ============================================================
-# μRISCV Project - Pipeline Freeze mode with full pipeline table
+# μRISCV Project
 # ============================================================
 
 # ===== MEMORY LAYOUT CONSTANTS (REQUIRED BY SPEC) =====
