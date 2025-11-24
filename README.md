@@ -6,7 +6,7 @@ Minimum directive: .word
 ## Source Code
 
 ```
-main/
+CEPARCO-Case-Project/main/
 ├── CEPARCO-Case-Project.py          # Final implementation (MAIN ENTRY POINT)
 └── README.md                        # Project documentation
 ```
