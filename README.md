@@ -16,4 +16,11 @@ https://drive.google.com/file/d/11MM2coCsVog75gngo4BsEMJZ_NPTL_fR/view?usp=shari
 - [x] Initial execution draft (step and full execution added)
 # Video Demo:
 https://drive.google.com/file/d/14tkBBiv5gQm1CpLOTHKn6AXlTAyt5T0J/view?usp=sharing
+---
+## Milestone 3
+- [ ] Updating registers and memory
+- [ ] Pipeline Map
+- [ ] Completed project
+# Video Demo:
+
 
