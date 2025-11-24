@@ -10,6 +10,16 @@ CEPARCO-Case-Project/main/
 ├── CEPARCO-Case-Project.py          # Final implementation (MAIN ENTRY POINT)
 └── README.md                        # Project documentation
 ```
+## GUI Components
+<img width="1393" height="710" alt="image" src="https://github.com/user-attachments/assets/f53130b5-a7f9-4cf4-9ee5-9eaeed4644dc" />
+1. Multi-tab Interface
+   - Program Input: Assembly code editor with line numbers
+   - Register Tab: Live register values (hex + decimal)
+   - Memory Input: Editable memory contents
+   - Pipeline State: Textual pipeline stage details
+   - Pipeline Map Table: Color-coded pipeline visualization
+   - Opcode Output: Generated machine code
+
 
 ## Execution
 insert screenshots here
@@ -40,3 +50,5 @@ insert link here
 - [x] Updating registers and memory
 - [x] Pipeline Map
 - [x] Completed project
+
+
