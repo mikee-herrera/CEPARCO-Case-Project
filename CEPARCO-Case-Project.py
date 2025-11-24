@@ -227,7 +227,8 @@ class RiscVGUI:
 
     def write_word(self, addr, value):
         """Write 4 bytes as a word (little-endian)"""
-        if addr < DATA_START or addr > DATA_END - 3 or addr % 4 != 0:
+        # Allow writes to both data (0x0000-0x007F) and program (0x0080-0x00FF) memory areas
+        if addr < self.memory_low or addr > self.memory_high - 3 or addr % 4 != 0:
             return False
 
         self.memory[addr] = value & 0xFF
@@ -515,7 +516,8 @@ class RiscVGUI:
 
         # LW instruction
         if opcode == "0000011" and funct3 == "010":
-            if DATA_START <= addr <= DATA_END - 3 and addr % 4 == 0:
+            # Check if address is within valid memory range and word-aligned
+            if self.memory_low <= addr <= self.memory_high - 3 and addr % 4 == 0:
                 lmd = self.read_word(addr)
             else:
                 lmd = 0
@@ -529,7 +531,8 @@ class RiscVGUI:
         # SW instruction
         if opcode == "0100011" and funct3 == "010":
             data = ex.get('B', 0)
-            if DATA_START <= addr <= DATA_END - 3 and addr % 4 == 0:
+            # Check if address is within valid memory range and word-aligned
+            if self.memory_low <= addr <= self.memory_high - 3 and addr % 4 == 0:
                 self.write_word(addr, data)
             self.pipeline_state['MEM_WB'] = {
                 'LMD': 0,
