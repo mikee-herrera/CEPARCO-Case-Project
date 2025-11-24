@@ -44,26 +44,25 @@ PALETTE = [
 class RiscVGUI:
     def __init__(self, root):
         self.reg_entries = []
-        self.reg_dec_labels = []  # FIX: Initialize reg_dec_labels
+        self.reg_dec_labels = []
         self.entry_row_count = 0
         self.entry_widgets = []
         self.line_labels = []
         self.root = root
-        self.root.title("μRISCV Assembler Simulator - Pipeline Freeze (Table + Colors)")
+        self.root.title("μRISCV Assembler Simulator - Pipeline Freeze")
         self.root.geometry("1300x780")
 
         # pipeline registers / state
         self.pipeline_state = {
             'PC': PROG_START,
             'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},
-            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0, 'PC': 0}, 
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
             'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
             'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0},
-            'WB': {'IR': 0, 'RD': 0, 'VALUE': 0}
+            'WB': {'IR': 0, 'RD': 0, 'VALUE': 0}  
         }
 
         # Keep history per cycle for the pipeline table representation
-        # Each entry is a dict of row_name -> string
         self.pipeline_history = []
 
         # map IR -> color
@@ -77,7 +76,7 @@ class RiscVGUI:
         # Expanded memory range: 0x0000 .. 0x00FF
         self.memory_low = DATA_START
         self.memory_high = PROG_END
-        self.memory = {addr: 0 for addr in range(self.memory_low, self.memory_high + 1)}  # byte addressed storage
+        self.memory = {addr: 0 for addr in range(self.memory_low, self.memory_high + 1)}
         self.memory_entries = {}
 
         self.create_buttons()
@@ -88,12 +87,16 @@ class RiscVGUI:
         self.create_memory_tab()
         self.create_opcode_tab()
         self.create_pipeline_state_tab()
-        self.create_pipeline_table_tab()  # NEW: visual pipeline table
+        self.create_pipeline_table_tab()
 
         self.status_var = tk.StringVar()
         self.status_var.set("μRISCV - Pipeline Freeze mode | Color-coded pipeline map")
         status_bar = ttk.Label(root, textvariable=self.status_var, relief='sunken')
         status_bar.pack(side='bottom', fill='x')
+
+    def zero_bubble(self):
+        """Return a zeroed pipeline bubble state"""
+        return {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
 
     # -------------------------
     # UI Creation
@@ -131,13 +134,13 @@ class RiscVGUI:
         self.canvas_window = self.canvas1.create_window((0, 0), window=self.innerFrame, anchor="nw")
         self.innerFrame.columnconfigure(1, weight=1)
 
-        # FIX: Added proper headers and decimal column
+        # Headers
         ttk.Label(self.innerFrame, text="Reg", font=('Arial', 10, 'bold'), anchor="center").grid(row=0, column=0, padx=5, pady=5, sticky='ew')
         ttk.Label(self.innerFrame, text="Value (Hex)", font=('Arial', 10, 'bold'), anchor="center").grid(row=0, column=1, pady=5, sticky='ew')
         ttk.Label(self.innerFrame, text="Value (Dec)", font=('Arial', 10, 'bold'), anchor="center").grid(row=0, column=2, pady=5, sticky='ew')
 
-        self.reg_entries = []  # List to store all register entries
-        self.reg_dec_labels = []  # List to store decimal value labels
+        self.reg_entries = []
+        self.reg_dec_labels = []
 
         for i in range(32):
             reg_name = f"x{i}"
@@ -215,7 +218,7 @@ class RiscVGUI:
     def read_word(self, addr):
         """Read 4 bytes as a word (little-endian)"""
         if addr % 4 != 0:
-            return 0  # Only word-aligned reads
+            return 0
         b0 = self.memory.get(addr, 0)
         b1 = self.memory.get(addr + 1, 0)
         b2 = self.memory.get(addr + 2, 0)
@@ -224,7 +227,6 @@ class RiscVGUI:
 
     def write_word(self, addr, value):
         """Write 4 bytes as a word (little-endian)"""
-        # Only allow writes to data segment and ensure word alignment
         if addr < DATA_START or addr > DATA_END - 3 or addr % 4 != 0:
             return False
 
@@ -281,24 +283,29 @@ class RiscVGUI:
             entry.config(state='readonly')
 
     def reset_simulation(self):
+        """Reset the entire simulation to initial state"""
         self.pipeline_state = {
             'PC': PROG_START,
             'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},
-            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0, 'PC': 0},
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
             'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
             'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0},
-            'WB': {'IR': 0, 'RD': 0, 'VALUE': 0} 
+            'WB': {'IR': 0, 'RD': 0, 'VALUE': 0}
         }
         self.pipeline_history.clear()
         self.ir_color_map.clear()
         self.next_color_index = 0
-        self.cycle_count = 0  # Reset cycle count to 0
+        self.cycle_count = 0
         self.is_running = False
         
-        # Reset all registers to 0 using list
+        # Reset all registers to 0
         for i in range(32):
             REGISTER_FILE[i] = 0
-        REGISTER_FILE[0] = 0  # Ensure x0 is always 0
+        REGISTER_FILE[0] = 0
+        
+        # Reset memory
+        for addr in range(self.memory_low, self.memory_high + 1):
+            self.memory[addr] = 0
         
         self.update_register_display()
         self.update_memory_display()
@@ -307,15 +314,44 @@ class RiscVGUI:
         self.update_pc_display()
         self.status_var.set("Simulation reset")
         messagebox.showinfo("Reset", "Simulation has been reset")
+
+    # -------------------------
+    # Register Display Methods
+    # -------------------------
+    
+    def update_register_display(self):
+        """Update all register displays using the REGISTER_FILE"""
+        for i in range(32):
+            self.reg_entries[i].config(state='normal')
+            self.reg_entries[i].delete(0, tk.END)
+            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
+            self.reg_entries[i].config(state='readonly')
+            
+            # Update decimal label
+            self.reg_dec_labels[i].config(text=str(REGISTER_FILE[i]))
+        
+        # Update PC display
+        self.update_pc_display()
+
+    def update_register_display_from_file(self):
+        """Update register display directly from REGISTER_FILE"""
+        for i in range(32):
+            # Update hex entry
+            self.reg_entries[i].config(state='normal')
+            self.reg_entries[i].delete(0, tk.END)
+            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
+            if i == 0:
+                self.reg_entries[i].config(state='readonly', bg='#E0E0E0')
+            else:
+                self.reg_entries[i].config(state='readonly', bg='white')
+            
+            # Update decimal label
+            self.reg_dec_labels[i].config(text=str(REGISTER_FILE[i]))
+
     # -------------------------
     # Pipeline: core functions
     # -------------------------
     
-    # FIX: Add missing id_stage method
-    def id_stage(self):
-        """ID stage: Set register values for instruction in IF/ID"""
-        self.set_register_values_for_instruction()
-
     def step_execution(self):
         """Execute one pipeline cycle"""
         if not self.program_memory:
@@ -323,17 +359,21 @@ class RiscVGUI:
             return
 
         # For the very first step after loading program, prime the pipeline
-        if self.cycle_count == 0 and not self.pipeline_state['IF_ID']['IR']:
-            self.prime_pipeline()
+        if self.cycle_count == 0 and self.pipeline_state['IF_ID']['IR'] == 0:
+            print("Priming pipeline - first cycle")
+            self.instruction_fetch()
+            if self.pipeline_state['IF_ID']['IR']:
+                self.set_register_values_for_instruction()
             self.cycle_count += 1
             self.record_pipeline_snapshot()
             self.update_pipeline_display()
             self.update_pipeline_table()
+            self.update_pc_display()
             self.status_var.set(f"Cycle: {self.cycle_count} - Pipeline primed")
             return
 
         self.cycle_count += 1
-        print(f"\n=== Cycle {self.cycle_count} ===")  # Debug
+        print(f"\n=== Cycle {self.cycle_count} ===")
 
         # Record pipeline snapshot before advancement
         self.record_pipeline_snapshot()
@@ -347,7 +387,6 @@ class RiscVGUI:
         if self.pipeline_state['EX_MEM']['IR'] != 0:
             self.memory_access()
         else:
-            # If no instruction, clear MEM/WB
             self.pipeline_state['MEM_WB'] = {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
         
         # EX stage - execute instruction
@@ -359,15 +398,14 @@ class RiscVGUI:
         
         # ID stage - decode and read registers
         if self.pipeline_state['IF_ID']['IR'] != 0:
-            self.set_register_values_for_instruction()
+            id_ex_new = self.instruction_decode()
         else:
-            # If no instruction, clear ID/EX
-            self.pipeline_state['ID_EX'] = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
+            id_ex_new = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
         
         # Advance pipeline with freeze handling
-        self.pipeline_advance(ex_mem_new, branch_taken)
+        self.pipeline_advance(ex_mem_new, id_ex_new, branch_taken)
 
-        # Update other displays
+        # Update displays
         self.update_memory_display()
         self.update_pipeline_display()
         self.update_pipeline_table()
@@ -378,23 +416,19 @@ class RiscVGUI:
             self.finalize_execution()
 
     def record_pipeline_snapshot(self):
-        """Store human-readable snapshot of pipeline stages to build a detailed table later"""
-
-        # Helper to safely format ints
+        """Store human-readable snapshot of pipeline stages"""
         def fmt(v):
             if isinstance(v, int):
                 return f"0x{v:08x}" if v != 0 else ""
             return str(v)
 
-        # compute memory-at-exmem-aluoutput if valid
+        # Compute memory at EX/MEM ALUOUTPUT if valid
         mem_at_addr = ""
         ex_alu = self.pipeline_state['EX_MEM'].get('ALUOUTPUT', 0)
         if ex_alu and (DATA_START <= ex_alu <= DATA_END - 3) and ex_alu % 4 == 0:
             mem_at_addr = f"0x{self.read_word(ex_alu):08x}"
-        else:
-            mem_at_addr = ""
 
-        # compute writeback register name/value if available
+        # Compute writeback register name/value if available
         wb_rd_str = ""
         memwb_ir = self.pipeline_state['MEM_WB'].get('IR', 0)
         if memwb_ir:
@@ -403,45 +437,34 @@ class RiscVGUI:
             if rd != 0:
                 wb_rd_str = f"x{rd}=0x{REGISTER_FILE[rd]:08x}"
             else:
-                wb_rd_str = "x0=0x00000000"  # Show x0 explicitly
+                wb_rd_str = "x0=0x00000000"
 
         snap = {
-            # IF - Record current state BEFORE advancement
             'IF/ID.IR': fmt(self.pipeline_state['IF_ID'].get('IR', 0)),
             'IF/ID.NPC': fmt(self.pipeline_state['IF_ID'].get('NPC', 0)),
             'PC': fmt(self.pipeline_state.get('PC', 0)),
-
-            # ID - Record current state BEFORE advancement
             'ID/EX.A': fmt(self.pipeline_state['ID_EX'].get('A', 0)),
             'ID/EX.B': fmt(self.pipeline_state['ID_EX'].get('B', 0)),
             'ID/EX.IMM': str(self.pipeline_state['ID_EX'].get('IMM', 0)) if self.pipeline_state['ID_EX'].get('IMM', 0) != 0 else "",
             'ID/EX.IR': fmt(self.pipeline_state['ID_EX'].get('IR', 0)),
             'ID/EX.NPC': fmt(self.pipeline_state['ID_EX'].get('NPC', 0)),
-
-            # EX - Record current state BEFORE advancement
             'EX/MEM.ALUOUTPUT': fmt(self.pipeline_state['EX_MEM'].get('ALUOUTPUT', 0)),
             'EX/MEM.IR': fmt(self.pipeline_state['EX_MEM'].get('IR', 0)),
             'EX/MEM.B': fmt(self.pipeline_state['EX_MEM'].get('B', 0)),
             'EX/MEM.COND': str(self.pipeline_state['EX_MEM'].get('cond', 0)) if self.pipeline_state['EX_MEM'].get('cond', 0) else "",
-
-            # MEM - Record current state BEFORE advancement
             'MEM/WB.LMD': fmt(self.pipeline_state['MEM_WB'].get('LMD', 0)),
             'MEM/WB.IR': fmt(self.pipeline_state['MEM_WB'].get('IR', 0)),
             'MEM/WB.ALUOUTPUT': fmt(self.pipeline_state['MEM_WB'].get('ALUOUTPUT', 0)),
             'MEM[EX/MEM.ALUOUTPUT]': mem_at_addr,
-
-            # WB
             'WB': wb_rd_str
         }
 
-        # record snapshot
         self.pipeline_history.append(snap)
 
-        # assign colors for new instruction IRs seen in this snapshot (map each distinct IR to a color)
+        # Assign colors for new instruction IRs
         for key in ['IF/ID.IR', 'ID/EX.IR', 'EX/MEM.IR', 'MEM/WB.IR']:
             val = snap.get(key, "")
             if val and val not in self.ir_color_map:
-                # choose next color from palette
                 color = PALETTE[self.next_color_index % len(PALETTE)]
                 self.ir_color_map[val] = color
                 self.next_color_index += 1
@@ -469,7 +492,6 @@ class RiscVGUI:
         if instructions:
             opcodes = self.generate_opcodes(instructions)
             self.display_opcodes(opcodes)
-            # switch to opcode tab
             self.notebook.select(3)
 
         self.status_var.set("Execution completed - Opcodes generated")
@@ -478,12 +500,11 @@ class RiscVGUI:
         self.stepButton["state"] = "disabled"
 
     def memory_access(self):
-        """MEM stage: Handle memory operations based on current EX_MEM and place results in MEM_WB"""
+        """MEM stage: Handle memory operations"""
         ex = self.pipeline_state['EX_MEM']
         instruction = ex.get('IR', 0)
 
         if not instruction:
-            # no instruction to propagate
             self.pipeline_state['MEM_WB'] = {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0}
             return
 
@@ -525,7 +546,7 @@ class RiscVGUI:
         }
 
     def write_back(self):
-        """WB stage: Write results to register file using WB stage data"""
+        """WB stage: Write results to register file"""
         wb = self.pipeline_state['WB']
         instruction = wb.get('IR', 0)
         rd = wb.get('RD', 0)
@@ -534,7 +555,7 @@ class RiscVGUI:
         if not instruction:
             return
 
-        print(f"WB Stage: Instruction {instruction:08x}, rd=x{rd}, value=0x{value:08x}")  # Debug
+        print(f"WB Stage: Instruction {instruction:08x}, rd=x{rd}, value=0x{value:08x}")
 
         # Only write to non-zero registers
         if rd != 0:
@@ -544,42 +565,49 @@ class RiscVGUI:
         # Ensure x0 is always zero
         REGISTER_FILE[0] = 0
         
-        # IMMEDIATELY update the display after writing
+        # Update display after writing
         self.update_register_display_from_file()
-        self.pipeline_state['WB']['VALUE'] = 0  
+        self.pipeline_state['WB']['VALUE'] = 0
 
-    def pipeline_advance(self, ex_mem_new=None, branch_taken=False):
-        """Advance pipeline registers with pipeline-freeze policy for branches."""
+    def pipeline_advance(self, ex_mem_new=None, id_ex_new=None, branch_taken=False):
+        """Advance pipeline registers with pipeline-freeze policy for branches"""
         if ex_mem_new is None:
             ex_mem_new = {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0}
+        if id_ex_new is None:
+            id_ex_new = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
 
-        # WB <- MEM_WB (move instruction from MEM/WB to WB stage for writeback)
+        print(f"Pipeline Advance: branch_taken={branch_taken}")
+
+        # WB <- MEM_WB
         self.pipeline_state['WB'] = {
             'IR': self.pipeline_state['MEM_WB']['IR'],
             'RD': self.get_rd_from_instruction(self.pipeline_state['MEM_WB']['IR']),
             'VALUE': self.get_writeback_value(self.pipeline_state['MEM_WB'])
         }
 
-        # MEM/WB <- EX/MEM (from memory_access stage)
-        # This is already handled in memory_access()
+        # MEM_WB <- EX_MEM
+        self.pipeline_state['MEM_WB'] = {
+            'LMD': 0,
+            'IR': self.pipeline_state['EX_MEM']['IR'],
+            'ALUOUTPUT': self.pipeline_state['EX_MEM']['ALUOUTPUT']
+        }
 
         # EX/MEM becomes ex_mem_new (computed by EX stage)
         self.pipeline_state['EX_MEM'] = ex_mem_new
 
-        # Handle control hazards (pipeline freeze). If branch was taken in EX stage:
+        # Handle control hazards (pipeline freeze)
         if branch_taken:
             # Pipeline freeze: insert bubble into ID_EX and clear IF/ID
-            self.pipeline_state['ID_EX'] = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
+            self.pipeline_state['ID_EX'] = self.zero_bubble()
             self.pipeline_state['IF_ID'] = {'IR': 0, 'NPC': 0, 'PC': 0}
-            # Do NOT fetch new instruction this cycle
+            # Fetch new instruction at branch target
+            self.instruction_fetch()
             return
 
-        # Normal flow: move IF/ID into ID/EX
-        old_if_id = self.pipeline_state['IF_ID']
-        # Copy values so further updates to IF_ID don't affect ID_EX
-        self.pipeline_state['ID_EX'] = old_if_id.copy()
+        # Normal flow: move ID/EX
+        self.pipeline_state['ID_EX'] = id_ex_new
 
-        # Fetch next instruction into IF/ID (unless already out of program memory)
+        # Fetch next instruction
         self.instruction_fetch()
 
     def get_rd_from_instruction(self, instruction):
@@ -601,56 +629,71 @@ class RiscVGUI:
         
         if opcode == "0000011" and funct3 == "010":  # LW
             return mem_wb.get('LMD', 0)
-        else:  # ALU operations
+        else:
             return mem_wb.get('ALUOUTPUT', 0)
 
-    def set_register_values_for_instruction(self):
-        """Set register values A, B and immediate for instruction in IF/ID (for next ID/EX)"""
+    def instruction_decode(self):
+        """ID stage: Decode instruction and prepare for EX stage"""
         instruction = self.pipeline_state['IF_ID']['IR']
         if not instruction:
-            # Clear ID/EX if no instruction
-            self.pipeline_state['ID_EX'] = {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
-            return
+            return {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0}
 
         inst_bin = format(instruction, '032b')
-
+        
         rs1 = int(inst_bin[12:17], 2)
         rs2 = int(inst_bin[7:12], 2)
 
-        # Set values for next ID/EX - ALWAYS set these even for x0 to show in pipeline table
-        self.pipeline_state['ID_EX']['A'] = REGISTER_FILE[rs1]
-        self.pipeline_state['ID_EX']['B'] = REGISTER_FILE[rs2]
+        # Set values for next ID/EX
+        id_ex_new = {
+            'A': REGISTER_FILE[rs1],
+            'B': REGISTER_FILE[rs2],
+            'IR': instruction,
+            'NPC': self.pipeline_state['IF_ID']['NPC']
+        }
 
         # Set immediate value based on instruction type
         opcode = inst_bin[25:32]
-        if opcode in ["0010011", "0000011"]:  # I-type
-            imm = int(inst_bin[0:12], 2)
-            if inst_bin[0] == '1':
-                imm -= (1 << 12)
-            self.pipeline_state['ID_EX']['IMM'] = imm
-        elif opcode == "0100011":  # S-type
-            imm = int(inst_bin[0:7] + inst_bin[20:25], 2)
-            if inst_bin[0] == '1':
-                imm -= (1 << 12)
-            self.pipeline_state['ID_EX']['IMM'] = imm
-        elif opcode == "1100011":  # B-type
-            # B-type immediate reconstruction (13 bits including sign)
-            imm = int(inst_bin[0] + inst_bin[24] + inst_bin[1:7] + inst_bin[20:24], 2)
-            if inst_bin[0] == '1':
-                imm -= (1 << 13)
-            self.pipeline_state['ID_EX']['IMM'] = imm
-        else:
-            self.pipeline_state['ID_EX']['IMM'] = 0
+        imm_value = 0
+        
+        if opcode in ["0010011", "0000011"]:  # I-type (ORI, LW)
+            imm_bits = inst_bin[0:12]
+            imm_value = int(imm_bits, 2)
+            if imm_bits[0] == '1':
+                imm_value = imm_value - (1 << 12)
+                
+        elif opcode == "0100011":  # S-type (SW)
+            imm_11_5 = inst_bin[0:7]
+            imm_4_0 = inst_bin[20:25]
+            imm_bits = imm_11_5 + imm_4_0
+            imm_value = int(imm_bits, 2)
+            if imm_bits[0] == '1':
+                imm_value = imm_value - (1 << 12)
+                
+        elif opcode == "1100011":  # B-type (BLT, BGE)
+            imm_12 = inst_bin[0]
+            imm_11 = inst_bin[24]
+            imm_10_5 = inst_bin[1:7]
+            imm_4_1 = inst_bin[20:24]
+            imm_bits = imm_12 + imm_11 + imm_10_5 + imm_4_1 + '0'
+            imm_value = int(imm_bits, 2)
+            if imm_bits[0] == '1':
+                imm_value = imm_value - (1 << 13)
 
-        # Also set the NPC for branch/jump calculations
-        self.pipeline_state['ID_EX']['NPC'] = self.pipeline_state['IF_ID']['NPC']
-        self.pipeline_state['ID_EX']['IR'] = instruction
+        id_ex_new['IMM'] = imm_value
+        print(f"ID Stage: Set IMM = {imm_value} (0x{imm_value & 0xFFFFFFFF:08x}) for instruction 0x{instruction:08x}")
+
+        return id_ex_new
+
+    def set_register_values_for_instruction(self):
+        """Legacy method - now using instruction_decode instead"""
+        id_ex_new = self.instruction_decode()
+        self.pipeline_state['ID_EX'] = id_ex_new
 
     def instruction_fetch(self):
         """IF stage: Fetch instruction from program memory"""
         pc = self.pipeline_state['PC']
 
-        print(f"IF Stage: PC = 0x{pc:04x}")  # Debug
+        print(f"IF Stage: PC = 0x{pc:04x}")
 
         if pc in self.program_memory:
             instruction = self.program_memory[pc]
@@ -671,10 +714,10 @@ class RiscVGUI:
         instruction = idex.get('IR', 0)
 
         ex_mem_new = {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0}
-        branch_taken = False  # FIX: Initialize branch_taken
+        branch_taken = False
 
         if not instruction:
-            return ex_mem_new, branch_taken  # FIX: Return both values
+            return ex_mem_new, branch_taken
 
         inst_bin = format(instruction, '032b')
         opcode = inst_bin[25:32]
@@ -688,7 +731,7 @@ class RiscVGUI:
         ex_mem_new['IR'] = instruction
         ex_mem_new['B'] = rs2_val
 
-        print(f"EX Stage: Instruction {instruction:08x}, opcode={opcode}, funct3={funct3}")  # Debug
+        print(f"EX Stage: Instruction {instruction:08x}, opcode={opcode}, funct3={funct3}")
         print(f"  rs1_val=0x{rs1_val:08x}, rs2_val=0x{rs2_val:08x}, imm_val={imm_val}")
 
         # R-type instructions
@@ -727,24 +770,24 @@ class RiscVGUI:
         elif opcode == "1100011":
             branch_taken = False
             if funct3 == "100":  # BLT
-                branch_taken = (rs1_val < rs2_val) if (rs1_val < 0x80000000 and rs2_val < 0x80000000) else \
-                              ((rs1_val & 0x7FFFFFFF) < (rs2_val & 0x7FFFFFFF)) if (rs1_val >= 0x80000000 and rs2_val >= 0x80000000) else \
-                              (rs1_val >= 0x80000000)
-                print(f"  BLT: 0x{rs1_val:08x} < 0x{rs2_val:08x} = {branch_taken}")
+                rs1_signed = rs1_val if rs1_val < 0x80000000 else rs1_val - 0x100000000
+                rs2_signed = rs2_val if rs2_val < 0x80000000 else rs2_val - 0x100000000
+                branch_taken = rs1_signed < rs2_signed
+                print(f"  BLT: 0x{rs1_val:08x} ({rs1_signed}) < 0x{rs2_val:08x} ({rs2_signed}) = {branch_taken}")
             elif funct3 == "101":  # BGE
-                branch_taken = (rs1_val >= rs2_val) if (rs1_val < 0x80000000 and rs2_val < 0x80000000) else \
-                              ((rs1_val & 0x7FFFFFFF) >= (rs2_val & 0x7FFFFFFF)) if (rs1_val >= 0x80000000 and rs2_val >= 0x80000000) else \
-                              (rs2_val >= 0x80000000)
-                print(f"  BGE: 0x{rs1_val:08x} >= 0x{rs2_val:08x} = {branch_taken}")
+                rs1_signed = rs1_val if rs1_val < 0x80000000 else rs1_val - 0x100000000
+                rs2_signed = rs2_val if rs2_val < 0x80000000 else rs2_val - 0x100000000
+                branch_taken = rs1_signed >= rs2_signed
+                print(f"  BGE: 0x{rs1_val:08x} ({rs1_signed}) >= 0x{rs2_val:08x} ({rs2_signed}) = {branch_taken}")
 
             ex_mem_new['cond'] = 1 if branch_taken else 0
 
             if branch_taken:
-                branch_target = (npc_val + (imm_val << 1)) & 0xFFFFFFFF  # Note: branch offsets are in 2-byte increments
+                branch_target = (npc_val + (imm_val << 1)) & 0xFFFFFFFF
                 print(f"  Branch taken! Target: 0x{branch_target:08x}")
                 self.pipeline_state['PC'] = branch_target
 
-        return ex_mem_new, branch_taken  # FIX: Return both values
+        return ex_mem_new, branch_taken
 
     def update_pc_display(self):
         """Update PC display in register tab"""
@@ -752,20 +795,6 @@ class RiscVGUI:
         self.pc_entry.delete(0, tk.END)
         self.pc_entry.insert(0, f"0x{self.pipeline_state['PC']:08x}")
         self.pc_entry.config(state='readonly')
-
-    def update_register_display(self):
-        """Update all register displays using the list"""
-        for i in range(32):
-            self.reg_entries[i].config(state='normal')
-            self.reg_entries[i].delete(0, tk.END)
-            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
-            self.reg_entries[i].config(state='readonly')
-            
-            # Update decimal label
-            self.reg_dec_labels[i].config(text=str(REGISTER_FILE[i]))
-        
-        # Update PC display
-        self.update_pc_display()
 
     def update_pipeline_display(self):
         """Update pipeline state display (textual)"""
@@ -782,7 +811,7 @@ class RiscVGUI:
             ("ID/EX", self.pipeline_state['ID_EX']),
             ("EX/MEM", self.pipeline_state['EX_MEM']),
             ("MEM/WB", self.pipeline_state['MEM_WB']),
-            ("WB", self.pipeline_state['WB'])  # NEW: Add WB stage
+            ("WB", self.pipeline_state['WB'])
         ]
 
         for stage_name, stage_data in stages:
@@ -800,7 +829,7 @@ class RiscVGUI:
     # Pipeline Table Tab (detailed)
     # -------------------------
     def create_pipeline_table_tab(self):
-        """Create a tab that visualizes pipeline progress as a table similar to the attached image."""
+        """Create a tab that visualizes pipeline progress as a table"""
         self.pipeline_table_frame = tk.Frame(self.notebook, bg="#F8F8F8")
         self.notebook.add(self.pipeline_table_frame, text="Pipeline Map Table")
 
@@ -808,20 +837,16 @@ class RiscVGUI:
         control_frame.pack(fill='x', pady=5)
         tk.Button(control_frame, text="Clear Table", command=self.clear_pipeline_table).pack(side='right', padx=5)
 
-        # Canvas where we'll draw a grid of cycles vs stages
         self.table_canvas = tk.Canvas(self.pipeline_table_frame, bg='white', height=420)
         self.table_canvas.pack(fill='both', expand=True, padx=10, pady=10)
 
-        # small legend
         legend = tk.Label(self.pipeline_table_frame, text="Legend: each color = one instruction. Rows correspond to pipeline fields (IF/ID.IR, IF/ID.NPC, PC, ID/EX.*, EX/MEM.*, MEM/WB.*, MEM[..], WB).", bg="#F8F8F8", anchor='w', justify='left')
         legend.pack(fill='x')
 
-        # initialize
         self.max_cycles_display = 20
         self.table_cell_w = 120
         self.table_cell_h = 26
 
-        # define row order to match your screenshot
         self.table_rows = [
             'IF/ID.IR', 'IF/ID.NPC', 'PC',
             'ID/EX.A', 'ID/EX.B', 'ID/EX.IMM', 'ID/EX.IR', 'ID/EX.NPC',
@@ -840,14 +865,13 @@ class RiscVGUI:
         self.table_canvas.delete('all')
 
     def update_pipeline_table(self):
-        """Redraw the pipeline table from the recorded pipeline_history."""
+        """Redraw the pipeline table from the recorded pipeline_history"""
         self.table_canvas.delete('all')
 
         cols = max(1, min(self.max_cycles_display, len(self.pipeline_history)))
-        # headers: Stage + cycles
         headers = ['Stage'] + [f'cycle {i+1}' for i in range(cols)]
 
-        # draw headers
+        # Draw headers
         for c, h in enumerate(headers):
             x0 = c * self.table_cell_w
             y0 = 0
@@ -856,52 +880,230 @@ class RiscVGUI:
             self.table_canvas.create_rectangle(x0, y0, x1, y1, fill='#4E69A2', outline='black')
             self.table_canvas.create_text(x0 + 5, y0 + 3, anchor='nw', text=h, font=('Arial', 10, 'bold'), fill='white')
 
-        # draw rows
+        # Draw rows
         for r, row in enumerate(self.table_rows):
             for c in range(cols + 1):
                 x0 = c * self.table_cell_w
                 y0 = (r + 1) * self.table_cell_h
                 x1 = x0 + self.table_cell_w
                 y1 = y0 + self.table_cell_h
-                # header column style
+                
                 if c == 0:
                     self.table_canvas.create_rectangle(x0, y0, x1, y1, fill='#9BB0E3', outline='black')
                     self.table_canvas.create_text(x0 + 5, y0 + 3, anchor='nw', text=row, font=('Arial', 9, 'bold'))
                 else:
-                    # default cell background white
                     self.table_canvas.create_rectangle(x0, y0, x1, y1, fill='white', outline='black')
-                    # get snapshot for this column (column 1 corresponds to history index 0)
                     hist_idx = c - 1
                     if hist_idx < len(self.pipeline_history):
                         snap = self.pipeline_history[hist_idx]
                         cell_value = snap.get(row, "")
-                        # if the row is an IR-containing row, color by instruction IR value
+                        
+                        # Special handling for ID/EX.IMM - show both decimal and hex
+                        if row == 'ID/EX.IMM' and cell_value:
+                            try:
+                                imm_val = int(cell_value)
+                                if imm_val != 0:
+                                    cell_value = f"{imm_val} (0x{imm_val & 0xFFFFFFFF:08x})"
+                            except ValueError:
+                                pass
+                        
+                        # Color IR-containing rows
                         if row in ('IF/ID.IR', 'ID/EX.IR', 'EX/MEM.IR', 'MEM/WB.IR') and cell_value:
                             color = self.ir_color_map.get(cell_value, None)
                             if not color:
                                 color = PALETTE[self.next_color_index % len(PALETTE)]
                                 self.ir_color_map[cell_value] = color
                                 self.next_color_index += 1
-                            # draw colored rectangle same size (slightly inset)
                             self.table_canvas.create_rectangle(x0 + 2, y0 + 2, x1 - 2, y1 - 2, fill=color, outline='black')
-                            # overlay text (hex)
                             self.table_canvas.create_text(x0 + 6, y0 + 4, anchor='nw', text=cell_value, font=('Courier', 9))
                         else:
-                            # normal cell text
                             if cell_value:
                                 self.table_canvas.create_text(x0 + 6, y0 + 4, anchor='nw', text=cell_value, font=('Courier', 9))
-                    # else leave blank
-
-        # If more cycles than displayed, don't crash — just show last max
-        # Optionally, could add horizontal scroll or dynamic scaling later.
 
     # -------------------------
-    # Assembler / encoding helpers
+    # Program Input and Validation Methods
     # -------------------------
+
+    def hit_enter(self, event):
+        current_entry = event.widget
+        try:
+            widget_index = self.entry_widgets.index(current_entry)
+        except ValueError:
+            return "break"
+        last_index = len(self.entry_widgets) - 1
+        if widget_index == last_index:
+            self.add_entry(event)
+            self.canvas.yview_moveto(1.0)
+        elif (widget_index + 1) < len(self.entry_widgets):
+            self.entry_widgets[widget_index + 1].focus_set()
+        return "break"
+
+    def hit_backspace(self, event):
+        current_entry = event.widget
+        if self.runButton['state'] == 'normal':
+            self.runButton["state"] = "disabled"
+        try:
+            widget_index = self.entry_widgets.index(current_entry)
+        except ValueError:
+            return
+        current_text = current_entry.get()
+        if widget_index != 0 and not current_text:
+            self.entry_widgets[widget_index - 1].focus_set()
+            current_entry.destroy()
+            self.line_labels[widget_index].destroy()
+            del self.entry_widgets[widget_index]
+            del self.line_labels[widget_index]
+            for i in range(len(self.entry_widgets)):
+                self.line_labels[i].config(text=str(i + 1))
+            self.inner_frame.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            return "break"
+        if (self.runButton['state'] == 'active'):
+            self.runButton["state"] = "disabled"
+        return
+
+    def add_entry(self, event):
+        self.entry_row_count += 1
+        current_grid_row = self.entry_row_count
+        visible_line_num = len(self.entry_widgets) + 1
+        line_label = tk.Label(self.inner_frame, text=str(visible_line_num), bg="#D3D3D3")
+        line_label.grid(row=current_grid_row, column=0, sticky='w')
+        self.new_entry = tk.Entry(self.inner_frame, bg="white", width=100)
+        self.new_entry.grid(row=current_grid_row, column=1, padx=5, pady=2, sticky='ew')
+        self.entry_widgets.append(self.new_entry)
+        self.line_labels.append(line_label)
+        self.new_entry.focus_set()
+        self.new_entry.bind("<Return>", self.hit_enter)
+        self.new_entry.bind("<BackSpace>", self.hit_backspace)
+        self.new_entry.bind("<Delete>", self.disable_run)
+        self.new_entry.bind("<Key>", self.disable_run)
+        self.inner_frame.update_idletasks()
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
+    def disable_run(self, event):
+        self.runButton["state"] = "disabled"
+
+    def check_program(self):
+        """Validate the program and enable run/step buttons if valid"""
+        errors = []
+        valid_instructions = 0
+        instructions = []
+        for i, entry in enumerate(self.entry_widgets):
+            line_text = entry.get().strip()
+            if line_text:
+                instructions.append((i + 1, line_text))
+        if not instructions:
+            messagebox.showwarning("No Program", "Please enter some instructions to check.")
+            return
+        for line_num, instruction in instructions:
+            error = self.validate_instruction(line_num, instruction)
+            if error:
+                errors.append(error)
+            else:
+                valid_instructions += 1
+        if errors:
+            result_message = f"VALIDATION FAILED\n\nErrors found: {len(errors)}\nValid instructions: {valid_instructions}\n\nERROR DETAILS:\n" + "\n".join(errors)
+            messagebox.showerror("Program Check Results", result_message)
+            self.status_var.set(f"Check failed: {len(errors)} error(s) found")
+            self.runButton["state"] = "disabled"
+            self.stepButton["state"] = "disabled"
+        else:
+            result_message = f"PROGRAM VALID\n\nValid instructions: {valid_instructions}\nAll instructions are syntactically correct!"
+            messagebox.showinfo("Program Check Results", result_message)
+            self.status_var.set(f"Check passed: {valid_instructions} valid instruction(s)")
+            self.runButton["state"] = "active"
+            self.stepButton["state"] = "active"
+            self.load_program_to_memory()
+
+    def validate_instruction(self, line_num, instruction):
+        """Validate a single instruction line"""
+        instruction = instruction.split('#')[0].strip()
+        if not instruction:
+            return None
+        if ':' in instruction:
+            label_part = instruction.split(':')[0].strip()
+            instruction_part = instruction.split(':')[1].strip() if len(instruction.split(':')) > 1 else ""
+            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', label_part):
+                return f"Line {line_num}: Invalid label name '{label_part}'"
+            if instruction_part:
+                error = self.validate_instruction(line_num, instruction_part)
+                if error:
+                    return error
+            return None
+        if instruction.upper().startswith('SW'):
+            parts = re.split(r'[, \t]+', instruction)
+            parts = [p for p in parts if p]
+            if len(parts) < 3:
+                return f"Line {line_num}: SW requires 2 operands (rs2, offset(rs1))"
+            rs2 = parts[1].rstrip(',')
+            offset_rs1 = ' '.join(parts[2:])
+            if not REGISTER_PATTERN.match(rs2):
+                return f"Line {line_num}: Invalid source register '{rs2}' in SW"
+            match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1)
+            if not match:
+                return f"Line {line_num}: Invalid memory operand format '{offset_rs1}' in SW"
+            if not REGISTER_PATTERN.match(match.group(2)):
+                return f"Line {line_num}: Invalid base register '{match.group(2)}' in SW"
+            return None
+        parts = re.split(r'[,\s]+', instruction)
+        parts = [p for p in parts if p]
+        if not parts:
+            return None
+        mnemonic = parts[0].upper()
+        if mnemonic not in SUPPORTED_INSTRUCTIONS:
+            return f"Line {line_num}: Unsupported instruction '{mnemonic}'"
+        if mnemonic in R_TYPE:
+            if len(parts) != 4:
+                return f"Line {line_num}: {mnemonic} requires 3 operands (rd, rs1, rs2)"
+            for reg in parts[1:4]:
+                if not REGISTER_PATTERN.match(reg):
+                    return f"Line {line_num}: Invalid register '{reg}' in {mnemonic}"
+        elif mnemonic in I_TYPE:
+            if mnemonic == "LW":
+                if len(parts) != 3:
+                    return f"Line {line_num}: LW requires 2 operands (rd, offset(rs1))"
+                if not REGISTER_PATTERN.match(parts[1]):
+                    return f"Line {line_num}: Invalid destination register '{parts[1]}' in LW"
+                offset_rs1_part = parts[2]
+                if IMMEDIATE_PATTERN.match(offset_rs1_part) or HEX_PATTERN.match(offset_rs1_part):
+                    parts[2] = f"{offset_rs1_part}(x0)"
+                    offset_rs1_part = parts[2]
+                match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1_part)
+                if not match:
+                    return f"Line {line_num}: Invalid memory operand format '{offset_rs1_part}' in LW"
+                if not REGISTER_PATTERN.match(match.group(2)):
+                    return f"Line {line_num}: Invalid base register '{match.group(2)}' in LW"
+            else:
+                if len(parts) != 4:
+                    return f"Line {line_num}: ORI requires 3 operands (rd, rs1, immediate)"
+                if not REGISTER_PATTERN.match(parts[1]) or not REGISTER_PATTERN.match(parts[2]):
+                    return f"Line {line_num}: Invalid register in ORI"
+                if not (IMMEDIATE_PATTERN.match(parts[3]) or HEX_PATTERN.match(parts[3])):
+                    return f"Line {line_num}: Invalid immediate '{parts[3]}' in ORI"
+        elif mnemonic in B_TYPE:
+            if len(parts) != 4:
+                return f"Line {line_num}: {mnemonic} requires 3 operands (rs1, rs2, offset/label)"
+            for i in range(1, 3):
+                if not REGISTER_PATTERN.match(parts[i]):
+                    return f"Line {line_num}: Invalid register '{parts[i]}' in {mnemonic}"
+            imm_or_label = parts[3]
+            is_immediate = IMMEDIATE_PATTERN.match(imm_or_label) or HEX_PATTERN.match(imm_or_label)
+            is_label = re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', imm_or_label)
+            if not (is_immediate or is_label):
+                return f"Line {line_num}: Invalid offset or label '{imm_or_label}' in {mnemonic}"
+        elif mnemonic in DIRECTIVE:
+            if len(parts) != 2:
+                return f"Line {line_num}: .WORD requires 1 operand"
+            if not (IMMEDIATE_PATTERN.match(parts[1]) or HEX_PATTERN.match(parts[1])):
+                return f"Line {line_num}: Invalid value '{parts[1]}' for .WORD directive"
+        return None
+
+    # -------------------------
+    # Assembler / Encoding Methods
+    # -------------------------
+
     def load_program_to_memory(self):
-        """
-        Properly loads validated instructions into program_memory.
-        """
+        """Load validated instructions into program memory"""
         PROG_START = 0x0080
         address = PROG_START
 
@@ -1004,13 +1206,6 @@ class RiscVGUI:
         self.debug_program_memory()
         return True
 
-    def create_pipeline_state_tab(self):
-        self.pipeline_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
-        self.notebook.add(self.pipeline_frame, text="Pipeline State")
-        self.pipeline_text = scrolledtext.ScrolledText(self.pipeline_frame, bg="white", width=120, height=25, font=("Courier New", 10))
-        self.pipeline_text.pack(fill='both', expand=True, padx=10, pady=10)
-        self.pipeline_text.config(state=tk.DISABLED)
-
     def encode_r_type(self, instruction, operands):
         opcode = list(R_TYPE[instruction].keys())[0]
         funct3 = R_TYPE[instruction][opcode]
@@ -1101,8 +1296,34 @@ class RiscVGUI:
         except ValueError:
             raise ValueError(f"Invalid value for .WORD directive: {operand}")
 
+    def reg_to_bin(self, reg):
+        if not REGISTER_PATTERN.match(reg):
+            raise ValueError(f"Invalid register: {reg}")
+        return format(int(reg[1:]), '05b')
+
+    def imm_to_bin(self, imm, bits=12):
+        try:
+            if isinstance(imm, str) and imm.startswith('0x'):
+                imm_val = int(imm, 16)
+            else:
+                imm_val = int(imm)
+            if imm_val < 0:
+                imm_val = (1 << bits) + imm_val
+            return format(imm_val & ((1 << bits) - 1), f'0{bits}b')
+        except ValueError:
+            raise ValueError(f"Invalid immediate value: {imm}")
+
+    def binary_to_hex(self, binary_str):
+        padding = (4 - len(binary_str) % 4) % 4
+        binary_str = '0' * padding + binary_str
+        hex_str = ''
+        for i in range(0, len(binary_str), 4):
+            nibble = binary_str[i:i+4]
+            hex_str += format(int(nibble, 2), 'x')
+        return hex_str.zfill(8)
+
     def generate_opcodes(self, instructions):
-        """Generate opcodes for display - FIXED version"""
+        """Generate opcodes for display"""
         opcodes = []
         program_counter = PROG_START
         labels = {}
@@ -1209,204 +1430,12 @@ class RiscVGUI:
             self.opcode_text.insert(tk.END, "No opcodes generated.")
         self.opcode_text.config(state=tk.DISABLED)
 
-    # Remaining UI logic for program lines
-    def hit_enter(self, event):
-        current_entry = event.widget
-        try:
-            widget_index = self.entry_widgets.index(current_entry)
-        except ValueError:
-            return "break"
-        last_index = len(self.entry_widgets) - 1
-        if widget_index == last_index:
-            self.add_entry(event)
-            self.canvas.yview_moveto(1.0)
-        elif (widget_index + 1) < len(self.entry_widgets):
-            self.entry_widgets[widget_index + 1].focus_set()
-        return "break"
-
-    def hit_backspace(self, event):
-        current_entry = event.widget
-        if self.runButton['state'] == 'normal':
-            self.runButton["state"] = "disabled"
-        try:
-            widget_index = self.entry_widgets.index(current_entry)
-        except ValueError:
-            return
-        current_text = current_entry.get()
-        if widget_index != 0 and not current_text:
-            self.entry_widgets[widget_index - 1].focus_set()
-            current_entry.destroy()
-            self.line_labels[widget_index].destroy()
-            del self.entry_widgets[widget_index]
-            del self.line_labels[widget_index]
-            for i in range(len(self.entry_widgets)):
-                self.line_labels[i].config(text=str(i + 1))
-            self.inner_frame.update_idletasks()
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-            return "break"
-        if (self.runButton['state'] == 'active'):
-            self.runButton["state"] = "disabled"
-        return
-
-    def add_entry(self, event):
-        self.entry_row_count += 1
-        current_grid_row = self.entry_row_count
-        visible_line_num = len(self.entry_widgets) + 1
-        line_label = tk.Label(self.inner_frame, text=str(visible_line_num), bg="#D3D3D3")
-        line_label.grid(row=current_grid_row, column=0, sticky='w')
-        self.new_entry = tk.Entry(self.inner_frame, bg="white", width=100)
-        self.new_entry.grid(row=current_grid_row, column=1, padx=5, pady=2, sticky='ew')
-        self.entry_widgets.append(self.new_entry)
-        self.line_labels.append(line_label)
-        self.new_entry.focus_set()
-        self.new_entry.bind("<Return>", self.hit_enter)
-        self.new_entry.bind("<BackSpace>", self.hit_backspace)
-        self.new_entry.bind("<Delete>", self.disable_run)
-        self.new_entry.bind("<Key>", self.disable_run)
-        self.inner_frame.update_idletasks()
-        self.canvas.config(scrollregion=self.canvas.bbox("all"))
-
-    def disable_run(self, event):
-        self.runButton["state"] = "disabled"
-
-    def check_program(self):
-        errors = []
-        valid_instructions = 0
-        instructions = []
-        for i, entry in enumerate(self.entry_widgets):
-            line_text = entry.get().strip()
-            if line_text:
-                instructions.append((i + 1, line_text))
-        if not instructions:
-            messagebox.showwarning("No Program", "Please enter some instructions to check.")
-            return
-        for line_num, instruction in instructions:
-            error = self.validate_instruction(line_num, instruction)
-            if error:
-                errors.append(error)
-            else:
-                valid_instructions += 1
-        if errors:
-            result_message = f"VALIDATION FAILED\n\nErrors found: {len(errors)}\nValid instructions: {valid_instructions}\n\nERROR DETAILS:\n" + "\n".join(errors)
-            messagebox.showerror("Program Check Results", result_message)
-            self.status_var.set(f"Check failed: {len(errors)} error(s) found")
-            self.runButton["state"] = "disabled"
-            self.stepButton["state"] = "disabled"
-        else:
-            result_message = f"PROGRAM VALID\n\nValid instructions: {valid_instructions}\nAll instructions are syntactically correct!"
-            messagebox.showinfo("Program Check Results", result_message)
-            self.status_var.set(f"Check passed: {valid_instructions} valid instruction(s)")
-            self.runButton["state"] = "active"
-            self.stepButton["state"] = "active"
-            self.load_program_to_memory()
-
-    def validate_instruction(self, line_num, instruction):
-        instruction = instruction.split('#')[0].strip()
-        if not instruction:
-            return None
-        if ':' in instruction:
-            label_part = instruction.split(':')[0].strip()
-            instruction_part = instruction.split(':')[1].strip() if len(instruction.split(':')) > 1 else ""
-            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', label_part):
-                return f"Line {line_num}: Invalid label name '{label_part}'"
-            if instruction_part:
-                error = self.validate_instruction(line_num, instruction_part)
-                if error:
-                    return error
-            return None
-        if instruction.upper().startswith('SW'):
-            parts = re.split(r'[, \t]+', instruction)
-            parts = [p for p in parts if p]
-            if len(parts) < 3:
-                return f"Line {line_num}: SW requires 2 operands (rs2, offset(rs1))"
-            rs2 = parts[1].rstrip(',')
-            offset_rs1 = ' '.join(parts[2:])
-            if not REGISTER_PATTERN.match(rs2):
-                return f"Line {line_num}: Invalid source register '{rs2}' in SW"
-            match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1)
-            if not match:
-                return f"Line {line_num}: Invalid memory operand format '{offset_rs1}' in SW"
-            if not REGISTER_PATTERN.match(match.group(2)):
-                return f"Line {line_num}: Invalid base register '{match.group(2)}' in SW"
-            return None
-        parts = re.split(r'[,\s]+', instruction)
-        parts = [p for p in parts if p]
-        if not parts:
-            return None
-        mnemonic = parts[0].upper()
-        if mnemonic not in SUPPORTED_INSTRUCTIONS:
-            return f"Line {line_num}: Unsupported instruction '{mnemonic}'"
-        if mnemonic in R_TYPE:
-            if len(parts) != 4:
-                return f"Line {line_num}: {mnemonic} requires 3 operands (rd, rs1, rs2)"
-            for reg in parts[1:4]:
-                if not REGISTER_PATTERN.match(reg):
-                    return f"Line {line_num}: Invalid register '{reg}' in {mnemonic}"
-        elif mnemonic in I_TYPE:
-            if mnemonic == "LW":
-                if len(parts) != 3:
-                    return f"Line {line_num}: LW requires 2 operands (rd, offset(rs1))"
-                if not REGISTER_PATTERN.match(parts[1]):
-                    return f"Line {line_num}: Invalid destination register '{parts[1]}' in LW"
-                offset_rs1_part = parts[2]
-                if IMMEDIATE_PATTERN.match(offset_rs1_part) or HEX_PATTERN.match(offset_rs1_part):
-                    parts[2] = f"{offset_rs1_part}(x0)"
-                    offset_rs1_part = parts[2]
-                match = re.match(r'(-?0x[0-9a-fA-F]+|-?[0-9]+)\((\w+)\)', offset_rs1_part)
-                if not match:
-                    return f"Line {line_num}: Invalid memory operand format '{offset_rs1_part}' in LW"
-                if not REGISTER_PATTERN.match(match.group(2)):
-                    return f"Line {line_num}: Invalid base register '{match.group(2)}' in LW"
-            else:
-                if len(parts) != 4:
-                    return f"Line {line_num}: ORI requires 3 operands (rd, rs1, immediate)"
-                if not REGISTER_PATTERN.match(parts[1]) or not REGISTER_PATTERN.match(parts[2]):
-                    return f"Line {line_num}: Invalid register in ORI"
-                if not (IMMEDIATE_PATTERN.match(parts[3]) or HEX_PATTERN.match(parts[3])):
-                    return f"Line {line_num}: Invalid immediate '{parts[3]}' in ORI"
-        elif mnemonic in B_TYPE:
-            if len(parts) != 4:
-                return f"Line {line_num}: {mnemonic} requires 3 operands (rs1, rs2, offset/label)"
-            for i in range(1, 3):
-                if not REGISTER_PATTERN.match(parts[i]):
-                    return f"Line {line_num}: Invalid register '{parts[i]}' in {mnemonic}"
-            imm_or_label = parts[3]
-            is_immediate = IMMEDIATE_PATTERN.match(imm_or_label) or HEX_PATTERN.match(imm_or_label)
-            is_label = re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', imm_or_label)
-            if not (is_immediate or is_label):
-                return f"Line {line_num}: Invalid offset or label '{imm_or_label}' in {mnemonic}"
-        elif mnemonic in DIRECTIVE:
-            if len(parts) != 2:
-                return f"Line {line_num}: .WORD requires 1 operand"
-            if not (IMMEDIATE_PATTERN.match(parts[1]) or HEX_PATTERN.match(parts[1])):
-                return f"Line {line_num}: Invalid value '{parts[1]}' for .WORD directive"
-        return None
-
-    def reg_to_bin(self, reg):
-        if not REGISTER_PATTERN.match(reg):
-            raise ValueError(f"Invalid register: {reg}")
-        return format(int(reg[1:]), '05b')
-
-    def imm_to_bin(self, imm, bits=12):
-        try:
-            if isinstance(imm, str) and imm.startswith('0x'):
-                imm_val = int(imm, 16)
-            else:
-                imm_val = int(imm)
-            if imm_val < 0:
-                imm_val = (1 << bits) + imm_val
-            return format(imm_val & ((1 << bits) - 1), f'0{bits}b')
-        except ValueError:
-            raise ValueError(f"Invalid immediate value: {imm}")
-
-    def binary_to_hex(self, binary_str):
-        padding = (4 - len(binary_str) % 4) % 4
-        binary_str = '0' * padding + binary_str
-        hex_str = ''
-        for i in range(0, len(binary_str), 4):
-            nibble = binary_str[i:i+4]
-            hex_str += format(int(nibble, 2), 'x')
-        return hex_str.zfill(8)
+    def create_pipeline_state_tab(self):
+        self.pipeline_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
+        self.notebook.add(self.pipeline_frame, text="Pipeline State")
+        self.pipeline_text = scrolledtext.ScrolledText(self.pipeline_frame, bg="white", width=120, height=25, font=("Courier New", 10))
+        self.pipeline_text.pack(fill='both', expand=True, padx=10, pady=10)
+        self.pipeline_text.config(state=tk.DISABLED)
 
     def create_opcode_tab(self):
         self.opcode_frame = tk.Frame(self.notebook, bg="#D3D3D3", bd=3)
@@ -1429,40 +1458,20 @@ class RiscVGUI:
         self.checkButton = Button(frame, text="Check", width=6, command=self.check_program)
         self.checkButton.pack(side="right", padx=2)
 
-    def update_register_display_from_file(self):
-        """Update register display directly from REGISTER_FILE"""
-        for i in range(32):
-            # Update hex entry
-            self.reg_entries[i].config(state='normal')
-            self.reg_entries[i].delete(0, tk.END)
-            self.reg_entries[i].insert(0, f"0x{REGISTER_FILE[i]:08x}")
-            if i == 0:
-                self.reg_entries[i].config(state='readonly', bg='#E0E0E0')
-            else:
-                self.reg_entries[i].config(state='readonly', bg='white')
-            
-            # Update decimal label
-            self.reg_dec_labels[i].config(text=str(REGISTER_FILE[i]))
-    def prime_pipeline(self):
-        """Prime the pipeline by fetching first instruction"""
-        self.instruction_fetch()
-        if self.pipeline_state['IF_ID'].get('IR', 0):
-            self.set_register_values_for_instruction()
-
     def run_program(self):
         """Run program to completion"""
         if not self.load_program_to_memory():
             messagebox.showwarning("No Program", "No valid program to execute")
             return
 
-        # Reset pipeline state (same as reset button)
+        # Reset pipeline state
         self.pipeline_state = {
             'PC': PROG_START,
             'IF_ID': {'IR': 0, 'NPC': 0, 'PC': 0},
-            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0, 'PC': 0},
+            'ID_EX': {'A': 0, 'B': 0, 'IMM': 0, 'IR': 0, 'NPC': 0},
             'EX_MEM': {'ALUOUTPUT': 0, 'cond': 0, 'IR': 0, 'B': 0},
             'MEM_WB': {'LMD': 0, 'IR': 0, 'ALUOUTPUT': 0},
-            'WB': {'IR': 0, 'RD': 0, 'VALUE': 0} # <--- CRITICAL FIX
+            'WB': {'IR': 0, 'RD': 0, 'VALUE': 0}
         }
         self.pipeline_history.clear()
         self.ir_color_map.clear()
@@ -1470,7 +1479,7 @@ class RiscVGUI:
         self.cycle_count = 0
 
         # Run cycles
-        max_cycles = 1000  # safety
+        max_cycles = 1000
         while not self.is_program_complete() and self.cycle_count < max_cycles:
             self.step_execution()
             self.root.update()
