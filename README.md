@@ -23,7 +23,7 @@ CEPARCO-Case-Project/main/
 ## Design Methodology
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Frontend GUI  │───▶│  Pipeline Engine │───▶│  Memory System  │
+│   Frontend GUI  │───▶│  Pipeline Engine │───▶│  Memory System │
 │                 │    │                  │    │                 │
 │ • Tkinter UI    │    │ • 5-stage pipe   │    │ • Data Memory   │
 │ • Multi-tab     │    │ • Hazard handling│    │ • Program Memory│
