@@ -20,7 +20,46 @@ CEPARCO-Case-Project/main/
    - Pipeline Map Table: Color-coded pipeline visualization
    - Opcode Output: Generated machine code
 
+## Design Methodology
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Frontend GUI  │───▶│  Pipeline Engine │───▶│  Memory System  │
+│                 │    │                  │    │                 │
+│ • Tkinter UI    │    │ • 5-stage pipe   │    │ • Data Memory   │
+│ • Multi-tab     │    │ • Hazard handling│    │ • Program Memory│
+│ • Visualization │    │ • State tracking │    │ • Word-aligned  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                         ┌───────────────┐
+                         │ Register File │
+                         │ • 32 registers│
+                         │ • x0 = 0      │
+                         └───────────────┘
+```
+**1. Frontend GUI (Tkinter-based Interface)**
+   - Multi-tab interface for different simulation aspects
+   - Program Input Tab: Assembly code editor with line numbers and syntax validation
+   - Register Tab: Live display of all 32 registers in hexadecimal and decimal formats
+   - Memory Tab: Editable memory contents with word-aligned addressing
+   - Pipeline State Tab: Textual representation of pipeline register contents
+   - Pipeline Map Table: Color-coded visualization of instruction flow through pipeline stages
+   - Opcode Output Tab: Generated machine code display
 
+**2. Pipeline Engine (Core Simulation Logic)**
+   - 5-stage RISC-V pipeline: IF, ID, EX, MEM, WB
+   - Pipeline Freeze Mechanism: Control hazard handling for branch instructions
+   - State Tracking: Comprehensive pipeline register monitoring
+   - Cycle Management: Step-by-step and continuous execution modes
+   - Hazard Detection: Identification and resolution of pipeline conflicts
+
+**3. Memory System (Dual Memory Architecture)**
+   - Data Memory: 128 bytes (0x0000-0x007F) for program data storage
+   - Program Memory: 128 bytes (0x0080-0x00FF) for instruction storage
+   - Word-aligned Access: 4-byte boundary enforcement for all memory operations
+
+Little-endian Format: Standard RISC-V byte ordering implementation
 ## Execution
 insert screenshots here
 
