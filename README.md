@@ -11,9 +11,15 @@ Minimum directive: .word
 # Video Demo:
 https://drive.google.com/file/d/11MM2coCsVog75gngo4BsEMJZ_NPTL_fR/view?usp=sharing
 ---
-## Milestone #2
+## Milestone 2
 - [x] GUI (registers, memory)
-- [x] Initial execution draft
+- [x] Initial execution draft (step and full execution added)
 # Video Demo:
-paste link here
+https://drive.google.com/file/d/14tkBBiv5gQm1CpLOTHKn6AXlTAyt5T0J/view?usp=sharing
 ---
+## Milestone 3
+- [ ] Updating registers and memory
+- [ ] Pipeline Map
+- [ ] Completed project
+# Video Demo:
+link here
