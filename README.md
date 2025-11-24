@@ -67,7 +67,7 @@ Little-endian Format: Standard RISC-V byte ordering implementation
 <img width="1242" height="796" alt="image" src="https://github.com/user-attachments/assets/6c696058-80c9-4534-b2c5-1f3f74893502" />
 
 #### EX 2 ORI Function
-<img width="201" height="67" alt="image" src="https://github.com/user-attachments/assets/9ff2c513-c668-4955-a580-a49fd25fc27f" />
+<img width="201" height="67" alt="image" src="https://github.com/user-attachments/assets/9ff2c513-c668-4955-a580-a49fd25fc27f" /><br>
 <img width="684" height="418" alt="image" src="https://github.com/user-attachments/assets/4f49c1d7-c82f-496d-9f20-f99f0dd8edef" />
 <img width="1218" height="819" alt="image" src="https://github.com/user-attachments/assets/f247724a-ca81-4e81-8217-b68fccbac132" />
 
@@ -77,7 +77,7 @@ Little-endian Format: Standard RISC-V byte ordering implementation
 We based our design on RARS, also known as the RISC-V Assembler, Simulator, and Runtime. We made use of a ```RiscVUI``` class which managed both the application state and the GUI components. Our interface is meant to simulate an IDE, with one input tab and separate output tabs which displayed the registers, memory, opcode outputs, pipeline states, and pipeline map. This program was tested using some of the instructions given in Problem Set 6. The outputs of the program were then compared to the outputs we obtained through manual computation in order to check if the program was working properly.
 
 ## Final Presentation Video
-insert link here
+#### https://drive.google.com/file/d/1HU0oOPGrCyf8g_5TlybL4IgPxDNs7Kz_/view?usp=sharing
 
 ## Project Updates
 ### Milestone #1
